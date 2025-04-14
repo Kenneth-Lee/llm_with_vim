@@ -92,17 +92,73 @@ function Setting()
 	syn match Question "^User: .*$"
 	syn keyword Type User Assistant System Configure
 
-	nmap j gj
-	nmap k gk
-	ab WAns Write a new scene:
-	ab ITns In the next scene,
-	imap jj <C-G>u<ESC>:call DoGen()<CR>
-	nmap <F1> :call DoGen()<CR>
-	set spell
-	set complete+=kspell
+	nmap <buffer> j gj
+	nmap <buffer> k gk
+	ab <buffer> WAns Write a new scene:
+	ab <buffer> ITns In the next scene,
+	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
+	nmap <buffer> <F1> :call DoGen()<CR>
+	setlocal spell
+	setlocal complete+=kspell
 endfunction
 
 augroup story_txt
   autocmd!
   autocmd BufRead,BufNewFile *.txt,*.tmp call Setting()
 augroup END
+
+" 生成outline
+
+" outline的文件名（不需要保存）
+let s:outline_bname = 'diaglog-outline.buffer'
+
+" 根据outline的行号退出outline窗口，转到正文对应位置
+function! DiaglogOutlineGotoLine(lnum)
+	let l:lnum = b:outline_marks[a:lnum-1]
+	execute "q!"
+	execute "bd" s:outline_bname
+	execute l:lnum
+endfunction
+
+function! OpenDiaglogOutline()
+	if buflisted(s:outline_bname)
+		if bufname() == s:outline_bname
+			execute "q!"
+			execute "bd!" s:outline_bname
+		endif
+		return
+	endif
+
+	let l:all_lines = getline(0, '$')
+	let l:cline = line(".")
+	let l:ocline = 1
+
+	execute '35vnew' s:outline_bname
+	execute 'set nowrap'
+	execute 'syn match Search "[>+-]"'
+	
+	let l:n = 1
+	let l:m = 1
+	let l:last_line = ""
+	let b:outline_marks = []
+	let l:levelstr=""
+	for line in l:all_lines
+		if line =~ "User: "
+			call setbufline(s:outline_bname, l:m, line)
+			call add(b:outline_marks, l:n)
+			let l:m += 1
+			if l:cline > l:n
+				let l:ocline = l:m   " 更新outline下标
+			endif
+		endif
+		let l:last_line = line
+		let l:n += 1
+	endfor
+
+	execute l:ocline
+
+	execute "nmap <buffer> <CR> :call OutlineGotoLine(line('.'))<CR>"
+	execute "nmap <buffer> q :q!<CR>:bd " . s:outline_bname . "<CR>"
+endfunction
+
+map <F2> :call OpenDiaglogOutline()<CR>
