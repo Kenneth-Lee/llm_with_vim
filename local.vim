@@ -11,9 +11,11 @@ if v:shell_error != 0
 	finish
 endif
 
-noremap K <Nop>
+" outline的文件名（该文件不需要保存）
+let s:outline_bname = 'diaglog-outline.buffer'
 
-function! DoGen()
+" 把[1,当前行]发入llama.py获取输出
+function DoGen()
 	" 保存开头到当前位置到临时Buffer中作为输入
 	let content = join(getline(1, '.'), "\n")
 	let l:temp_buf = bufnr('temp_llama_input', 1)
@@ -70,7 +72,7 @@ function! DoGen()
 		sleep 100m
 		let waitm += 1
 		if (waitm % 10) == 0
-			let &stl = '请求LLM（' . waitm/10 . '秒），按K（大写）中断...'
+			let &statusline = '请求LLM（' . waitm/10 . '秒），按K（大写）中断...'
 			redraw
 		endif
 	endwhile
@@ -86,32 +88,6 @@ function! DoGen()
 	endif
 endfunction
 
-function Setting()
-	syn match comment "^#.*$"
-	syn match comment "^//.*$"
-	syn match Question "^User: .*$"
-	syn keyword Type User Assistant System Configure
-
-	nmap <buffer> j gj
-	nmap <buffer> k gk
-	ab <buffer> WAns Write a new scene:
-	ab <buffer> ITns In the next scene,
-	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
-	nmap <buffer> <F1> :call DoGen()<CR>
-	setlocal spell
-	setlocal complete+=kspell
-endfunction
-
-augroup story_txt
-  autocmd!
-  autocmd BufRead,BufNewFile *.txt,*.tmp call Setting()
-augroup END
-
-" 生成outline
-
-" outline的文件名（不需要保存）
-let s:outline_bname = 'diaglog-outline.buffer'
-
 " 根据outline的行号退出outline窗口，转到正文对应位置
 function! DiaglogOutlineGotoLine(lnum)
 	let l:lnum = b:outline_marks[a:lnum-1]
@@ -120,6 +96,7 @@ function! DiaglogOutlineGotoLine(lnum)
 	execute l:lnum
 endfunction
 
+" 实现Outline
 function! OpenDiaglogOutline()
 	if buflisted(s:outline_bname)
 		if bufname() == s:outline_bname
@@ -143,7 +120,7 @@ function! OpenDiaglogOutline()
 	let b:outline_marks = []
 	let l:levelstr=""
 	for line in l:all_lines
-		if line =~ "User: "
+		if line =~ "^User: " || line =~ "^Configure: "
 			call setbufline(s:outline_bname, l:m, line)
 			call add(b:outline_marks, l:n)
 			let l:m += 1
@@ -159,6 +136,33 @@ function! OpenDiaglogOutline()
 
 	execute "nmap <buffer> <CR> :call OutlineGotoLine(line('.'))<CR>"
 	execute "nmap <buffer> q :q!<CR>:bd " . s:outline_bname . "<CR>"
+	execute "nmap <buffer> <F2> :q!<CR>:bd " . s:outline_bname . "<CR>"
 endfunction
 
-map <F2> :call OpenDiaglogOutline()<CR>
+function Setting()
+	" syntax本来就是针对当前Buffer的
+	syn match comment "^#.*$"
+	syn match comment "^//.*$"
+	syn match Search "^User: .*$"
+	syn match Title "^Configure: .*$"
+	syn keyword Type Assistant System
+
+	" 给当前buffer设置热键
+	nmap <buffer> j gj
+	nmap <buffer> k gk
+	noremap <buffer> K <Nop>
+	nmap <buffer> <F1> :call DoGen()<CR>
+	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
+	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
+
+	ab <buffer> WAns Write a new scene:
+	ab <buffer> ITns In the next scene,
+	setlocal spell
+	setlocal complete+=kspell
+endfunction
+
+" 对文本文件实现LLM的故事逻辑
+augroup story_txt
+  autocmd!
+  autocmd BufRead,BufNewFile *.txt,*.tmp call Setting()
+augroup END
