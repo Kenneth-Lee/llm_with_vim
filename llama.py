@@ -131,7 +131,7 @@ def answer():
     # 组合配置
     engine_type = _get_user_config_item("engine_type", "ollama", user_config)
     server_addr = _get_user_config_item("server_addr", "localhost", user_config)
-    model = _get_user_config_item("model", "deepseek-r1:32b", user_config)
+    model = _get_user_config_item("model", None, user_config)
     max_tokens = _get_user_config_item("max_tokens", 1024, user_config)
     temperature = _get_user_config_item("temperature", 1, user_config)
     if engine_type == "ollama":
@@ -144,8 +144,12 @@ def answer():
     elif engine_type=='deepseek':
         if model=='' or model=='default': model ='deepseek-chat'
         api = 'https://api.deepseek.com/chat/completions'
+    elif engine_type=='ali':
+        if model=='' or model=='default': model ='deepseek-r1'
+        api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
     elif engine_type=='ollama' or engine_type=='default':
         engine_type='ollama'
+        if model=='' or model=='default': model ='qwen2.5:0.5b'
         server_addr = _ollama_addr_alias.get(server_addr, server_addr)
         model = _ollama_model_alias.get(model, model)
         api = _make_ollama_api(server_addr)
@@ -173,7 +177,7 @@ def answer():
             auth_keys = _config.get("auth_keys", {})
             auth = auth_keys[engine_type]
         headers['Authorization'] = auth
-        debug(f"change head with {auth}")
+        # debug(f"change head with {auth}")
 
     # 根据配置完善请求记录
     history["model"] = model
@@ -182,17 +186,37 @@ def answer():
     if engine_type=='ollama':
         history["keep_alive"] = keep_alive
 
-    #debug(f"history={history}, headers={headers}")
+    debug(f"history={history}, headers={headers}")
 
     # 发起请求
     try:
         resp = requests.post(api, json=history, headers=headers, stream=True)
         resp.raise_for_status()
         _output_msg('assistant', '', end='')
-        for i in resp.iter_lines():
-            if i:
-                resp_i = json.loads(i.decode('utf-8'))
-                print(resp_i['message'].get('content', ''), end='', flush=True)
+        if engine_type=='haijing':
+            for i in resp.iter_lines():
+                if i:
+                    print(i.decode('utf-8'))
+        if engine_type=='ali':
+            for i in resp.iter_lines():
+                if i:
+                    i=i.decode('utf-8')
+                    if i.startswith('data:'):
+                        resp_s = i.split("data:", 1)[-1].strip()
+                        if resp_s == '[DONE]':
+                            break
+                        else:
+                            resp_i = json.loads(resp_s)
+                            resp_c = resp_i['choices'][0]['delta']['content']
+                            if resp_c:
+                                print(resp_c, end='', flush=True)
+                    else:
+                        debug(f"unknown response: {i}")
+        elif engine_type=='ollama':
+            for i in resp.iter_lines():
+                if i:
+                    resp_i = json.loads(i.decode('utf-8'))
+                    print(resp_i['message'].get('content', ''), end='', flush=True)
         print()
     except Exception as e:
         print()                             # 加一个换行，免得前面输出了一半就异常了

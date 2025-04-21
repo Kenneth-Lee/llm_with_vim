@@ -2,7 +2,7 @@
 	"config": {
     		"engine_type": "ollama",
     		"server_addr": "default",
-    		"model": "qwen2.5:1.5b",
+    		"model": "default",
 		"keep_alive": 3600
 	},
 
