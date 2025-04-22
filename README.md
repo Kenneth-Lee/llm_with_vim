@@ -10,20 +10,20 @@
 
 首先是配置，默认的配置在当前目录的config.json中，主要要配置的是下面这个部分：
 ```
-	"config": {
-    		"engine_type": "ollama",
-    		"server_addr": "default",
-    		"model": "qwen2.5:1.5b",
-            "keep_alive": 3600
-	}
+"config": {
+        "engine_type": "ollama",
+        "server_addr": "default",
+        "model": "qwen2.5:1.5b",
+        "keep_alive": 3600
+}
 ```
 含义也能猜到，直接看看默认的config.json就可以了。剩下的部分是脚本内部使用的，可
 以不用动。
 
 简单的用法是这样：
 ```
-  echo "hello" | python llama.py
-  python llama.py < chat.txt
+echo "hello" | python llama.py
+python llama.py < chat.txt
 ```
 这会打印输入的内容，然后补上LLM模型的回答。
 
@@ -32,14 +32,14 @@
 
 比如，现在需要和某个LLM模型对话了，你只要用vim打开一个.txt文件，然后在里面
 ```
-    :source local.vim
+:source local.vim
 ```
 
 这个动作其实应该可以自动化的，比如可以在~/.vimrc最后加上这一段：
 ```
-    if filereadable("local.vim")
-        source local.vim
-    endif
+if filereadable("local.vim")
+    source local.vim
+endif
 ```
 这样你包含这个local.vim中进入vim，它就自动生效了。
 
@@ -70,8 +70,38 @@ Assistant是LLM的回答。
 Configure的部分可以修改默认的config.json配置，如果你没有这个部分，发出请求的时
 候会根据当前配置给你生成一个，你可以基于这个生成的部分修改相关参数。
 
+ollama之外的平台普遍需要apikey，这个可以配置在config.json的auth\_keys中，但这个
+属于主线维护的一部分，升级版本会冲掉，所以更建议配置每个文本文件的Configure中，
+名字叫auth就可以了。比如这样：
+```
+Configure:  {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+```
+
 如果在输出的过程中需要中止请求，可以按K键（原K键功能被禁止了）。注意这里不要用
 Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任务。
 
 \<F2\>映射到outline功能，可以显示一个新窗口给出所有User的位置，你可以通过这个来定
 位到特定的问题，只要移动到特定的行然后回车就可以跳转到那个问答上。
+
+## FAQ
+
+Q：为什么不做成vim插件？
+
+A：插件是全局的，这个工具更像是个独立的应用，只是借用了一下vim的编程能力而已，
+没有必要做成插件。当然我也不反对你移植成插件。
+
+Q：为什么不遵循某种标准的api标准？
+
+A：我的目的是解决问题，现在都是我要用哪个平台我就适配那个平台（也欢迎其他开发者
+增加自己的平台），如果事实上这些平台有标准，它自然会统一，否则就由着它这样吧。
+
+Q：为什么不适配到vscode上？
+
+A：问得好，因为我没空，而且vscode我用得很少。所以……还是欢迎其他开发者适配到
+vscode上的。
+
+Q：为什么不解释一下config.json的其他域？
+
+A：那些你可以认为是代码的一部分，主要是用来处理别名的（比如你选了引擎，默认的
+api地址可以不用配置之类的）。这个主要是图我自己的方便，你不修改它们不影响使用。
+所以，有修改这些东西的需要，就自己看看代码吧——反正这个代码也不长。
