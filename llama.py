@@ -186,7 +186,7 @@ def answer():
     if engine_type=='ollama':
         history["keep_alive"] = keep_alive
 
-    debug(f"history={history}, headers={headers}")
+    # debug(f"history={history}, headers={headers}")
 
     # 发起请求
     try:
