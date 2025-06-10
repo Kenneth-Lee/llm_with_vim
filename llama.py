@@ -60,7 +60,7 @@ def _parse_input():
     前者是一个空的请求，config是输入中提供的配置
     """
     global _config
-    history=_config["request_template"]
+    history = _config["request_template"]
     history["messages"] = []
     user_config = None
 
@@ -119,6 +119,8 @@ def _get_user_config_item(name, default, user_config):
     return c
 
 def answer():
+    global _config
+
     # 时间统计
     start_time = time.time()
 
@@ -129,29 +131,34 @@ def answer():
     headers = { 'Content-Type':'application/json'}
 
     # 组合配置
+    common_config = _config['default_config']
     engine_type = _get_user_config_item("engine_type", "ollama", user_config)
     server_addr = _get_user_config_item("server_addr", "localhost", user_config)
-    model = _get_user_config_item("model", None, user_config)
-    max_tokens = _get_user_config_item("max_tokens", 1024, user_config)
-    temperature = _get_user_config_item("temperature", 1, user_config)
+    for key in common_config.keys():
+        common_config[key] = _get_user_config_item(key, common_config[key], user_config)
     if engine_type == "ollama":
         keep_alive = _get_user_config_item("keep_alive", 60, user_config)
 
     # 根据引擎类型设置默认参数，调整别名
     if engine_type=='haijing':
-        if model=='' or model=='default': model = 'DeepSeek-R1'
+        if common_config['model']=='' or common_config['model']=='default':
+            common_config['model'] = 'DeepSeek-R1'
         api = 'https://api.atalk-ai.com/chat/completions'
     elif engine_type=='deepseek':
-        if model=='' or model=='default': model ='deepseek-chat'
+        if common_config['model']=='' or common_config['model']=='default':
+            common_config['model'] = 'deepseek-chat'
         api = 'https://api.deepseek.com/chat/completions'
     elif engine_type=='ali':
-        if model=='' or model=='default': model ='deepseek-r1'
+        if common_config['model']=='' or common_config['model']=='default':
+            common_config['model'] ='deepseek-r1'
         api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
     elif engine_type=='ollama' or engine_type=='default':
         engine_type='ollama'
-        if model=='' or model=='default': model ='qwen2.5:0.5b'
+        if common_config['model']=='' or common_config['model']=='default':
+            common_config['model'] ='qwen2.5:0.5b'
         server_addr = _ollama_addr_alias.get(server_addr, server_addr)
-        model = _ollama_model_alias.get(model, model)
+        common_config['model'] = _ollama_model_alias.get(
+                common_config['model'], common_config['model'])
         api = _make_ollama_api(server_addr)
     else:
         print(f'未知引擎{engine_type}')
@@ -159,12 +166,9 @@ def answer():
 
     # 没有给用户配置的生成一个
     if not user_config:
-        user_config = {}
+        user_config = common_config.copy()    # 以common配置为基础（不能直接用，两者不重合）
         user_config["engine_type"] = engine_type
         user_config["server_addr"] = server_addr
-        user_config["model"] = model
-        user_config["max_tokens"] = max_tokens
-        user_config["temperature"] = temperature
         if engine_type == 'ollama':
             user_config["keep_alive"] = keep_alive
         print(_roles['config'], user_config)
@@ -173,16 +177,14 @@ def answer():
     if engine_type != 'ollama':
         auth = user_config.get('auth', None)
         if not auth:
-            global _config
             auth_keys = _config.get("auth_keys", {})
             auth = auth_keys[engine_type]
         headers['Authorization'] = auth
         # debug(f"change head with {auth}")
 
     # 根据配置完善请求记录
-    history["model"] = model
-    history["max_tokens"] = max_tokens
-    history["temperature"] = temperature
+    for key in common_config.keys():
+        history[key] = common_config[key]
     if engine_type=='ollama':
         history["keep_alive"] = keep_alive
 

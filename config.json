@@ -42,5 +42,16 @@
         "auth_keys": {
                 "haijing":  "Basic xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
                 "deepseek": "Carrier <sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx>"
-        }
+        },
+
+        "default_config": {
+                "model": "default",
+                "max_tokens": 1024,
+                "temperature": 1,
+                "repeat_penalty": 1.2
+        },
+
+	"default-config-comment": {
+		"comment": "通用参数及其默认值"
+         }
 }
