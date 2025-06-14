@@ -189,8 +189,10 @@ def answer():
         history["keep_alive"] = keep_alive
 
     # debug(f"history={history}, headers={headers}")
+    debug("===========>\n")
 
     # 发起请求
+    resp = None
     try:
         resp = requests.post(api, json=history, headers=headers, stream=True)
         resp.raise_for_status()
