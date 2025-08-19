@@ -8,7 +8,7 @@
 
 	"config-comment": {
 		"comment": "这是config部分的注释",
-		"engine_type": "ollama|deepseek|haijing",
+		"engine_type": "llama|ollama|deepseek|haijing",
 		"server_addr": "服务器的主机名，别名参考ollama_addr_alias",
 		"model": "模型名，别名参考ollama_model_alias",
 		"keep_alive": "保持服务数据激活的时间（秒为单位）"
@@ -35,8 +35,7 @@
 	
 	"request_template": {
         	"max_tokens":   1024,
-        	"temperature":  1.2,
-                "stream": true
+		"temperature":  1.2
 	},
 
         "auth_keys": {

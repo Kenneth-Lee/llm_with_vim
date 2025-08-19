@@ -57,7 +57,7 @@ def debug(msg):
 def _parse_input():
     """
     处理stdin的输入信息。返回history,config。
-    前者是一个空的请求，config是输入中提供的配置
+    前者是将要发送的请求，后者是输入中提供的配置
     """
     global _config
     history = _config["request_template"]
@@ -152,6 +152,8 @@ def answer():
         if common_config['model']=='' or common_config['model']=='default':
             common_config['model'] ='deepseek-r1'
         api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
+    elif engine_type=='llama':
+        api = 'http://' + server_addr + '/v1/chat/completions'
     elif engine_type=='ollama' or engine_type=='default':
         engine_type='ollama'
         if common_config['model']=='' or common_config['model']=='default':
@@ -174,7 +176,7 @@ def answer():
         print(_roles['config'], user_config)
 
     # api key需要特殊处理一下，用户配置没有的话，看看有没有全局配置
-    if engine_type != 'ollama':
+    if not (engine_type in ['ollama', 'llama']):
         auth = user_config.get('auth', None)
         if not auth:
             auth_keys = _config.get("auth_keys", {})
@@ -185,8 +187,10 @@ def answer():
     # 根据配置完善请求记录
     for key in common_config.keys():
         history[key] = common_config[key]
-    if engine_type=='ollama':
+    if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
+    if engine_type != 'llama':                   # llama不使用stream模式
+        history["stream"] = True
 
     # debug(f"history={history}, headers={headers}")
     debug("===========>\n")
@@ -216,11 +220,16 @@ def answer():
                                 print(resp_c, end='', flush=True)
                     else:
                         debug(f"unknown response: {i}")
-        elif engine_type=='ollama':
+        elif engine_type == 'ollama':
             for i in resp.iter_lines():
                 if i:
                     resp_i = json.loads(i.decode('utf-8'))
                     print(resp_i['message'].get('content', ''), end='', flush=True)
+        elif engine_type == 'llama':
+            for i in resp.iter_lines():
+                if i:
+                    resp_i = json.loads(i.decode('utf-8'))
+                    print(resp_i['choices'][0]['message'].get('content', ''), end='', flush=True)
         print()
     except Exception as e:
         print()                             # 加一个换行，免得前面输出了一半就异常了
