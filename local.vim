@@ -51,7 +51,7 @@ function DoGen()
 	endfunction
 
 	" 异步请求LLM
-	let l:job = job_start('python llama.py', {
+	let l:job = job_start('python3 llama.py', {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
 		\ 'out_cb': function('HandleOutput'),
@@ -113,7 +113,7 @@ function! OpenDiaglogOutline()
 	execute '35vnew' s:outline_bname
 	execute 'set nowrap'
 	execute 'syn match Search "[>+-]"'
-	
+
 	let l:n = 1
 	let l:m = 1
 	let l:last_line = ""

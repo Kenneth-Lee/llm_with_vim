@@ -112,3 +112,8 @@ api地址可以不用配置之类的）。这个主要是图我自己的方便�
 不一样的，通用的配置放在config.json的default\_config中，初值也在这里，然后全局
 的配置，在config.json的config中可以覆盖它，而且config还可以放非通用的配置，最后，
 每个单独的会话的“Config:”行，覆盖这个config的配置。
+
+## 已知问题
+
+* 我在llama.py中调用了str.removeprefix，这是Python 3.9才有的函数，如果你用的版
+  本比这个旧，麻烦自己修改一下，实现一下这个函数。
