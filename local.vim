@@ -64,15 +64,32 @@ function DoGen()
 	let waitm = 0
 
 	while job_status(l:job) == 'run'
-		if getchar(1) == char2nr('K')
-			let l:interrupted = 2
-			let l:int_by_key = 1
-			call job_stop(l:job)
+		" 清空并检查所有待处理的按键
+		let l:key = 0
+		while 1
+			let l:key = getchar(1)
+			if l:key == 0
+				break  " 没有更多按键了
+			endif
+			if l:key == char2nr('K')
+				let l:interrupted = 2
+				let l:int_by_key = 1
+				call job_stop(l:job)
+				break  " 检测到K键，跳出
+			endif
+			" 其他按键被消费掉，避免污染缓冲区
+		endwhile
+
+		if l:int_by_key
+			break  " 已中断，退出主循环
 		endif
-		sleep 100m
+
+		sleep 50m
 		let waitm += 1
-		if (waitm % 10) == 0
-			let &statusline = '请求LLM（' . waitm/10 . '秒），按K（大写）中断...'
+
+		" 更频繁地更新状态栏（每0.5秒）
+		if (waitm % 5) == 0
+			let &statusline = '请求LLM（' . (waitm/10.0) . '秒），按K（大写）中断...'
 			redraw
 		endif
 	endwhile
