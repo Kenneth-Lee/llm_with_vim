@@ -117,3 +117,17 @@ api地址可以不用配置之类的）。这个主要是图我自己的方便�
 
 * 我在llama.py中调用了str.removeprefix，这是Python 3.9才有的函数，如果你用的版
   本比这个旧，麻烦自己修改一下，实现一下这个函数。
+
+## Security Considerations
+
+* **API Keys**: Store API keys securely and never commit them to version control. Consider using environment variables or secure credential managers instead of storing keys directly in config.json.
+* **Configuration Validation**: Configuration values are now validated to prevent code injection and command execution attacks.
+* **Input Sanitization**: The tool validates user inputs to prevent malicious payloads from being processed.
+* **Timeout Handling**: API requests now have timeout limits to prevent hanging connections.
+
+## Best Practices
+
+* Regularly update dependencies to patch security vulnerabilities
+* Review and audit configuration files for sensitive information
+* Use strong authentication methods for API access
+* Monitor API usage for unusual patterns

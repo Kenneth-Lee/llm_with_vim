@@ -98,14 +98,50 @@ def _parse_input():
 
     if user_config:
         try:
-            uc = eval(user_config)
-            if type(uc) != dict:
-                raise Exception
+            # Use json.loads instead of eval for safety
+            # First, try to parse as JSON directly
+            import ast
+            # Try JSON parsing first (strict)
+            try:
+                uc = json.loads(user_config)
+            except json.JSONDecodeError:
+                # If that fails, try ast.literal_eval as a safer alternative to eval
+                # This handles Python dict syntax like {'key': 'value'}
+                uc = ast.literal_eval(user_config)
+
+            if not isinstance(uc, dict):
+                raise ValueError("Configuration must be a dictionary/object")
             return history, uc
-        except:
-            debug(f"wrong user config: {user_config}")
+        except (json.JSONDecodeError, ValueError, SyntaxError):
+            debug(f"Invalid user config: {user_config}")
+            debug("Configuration must be in JSON format like {\"key\": \"value\"} or Python dict format like {'key': 'value'}")
+            return history, None
 
     return history, None
+
+def _validate_config_value(name, value, expected_type=None):
+    """Validate configuration values to prevent malicious inputs"""
+    if expected_type and not isinstance(value, expected_type):
+        return False
+
+    # Validate strings for potential command injection
+    if isinstance(value, str):
+        # Check for potential command injection patterns
+        dangerous_patterns = [';', '|', '&', '`', '$(', '${', '\x00']
+        for pattern in dangerous_patterns:
+            if pattern in value:
+                return False
+        # Ensure reasonable length limits
+        if len(value) > 10000:  # Prevent extremely long values
+            return False
+
+    # Validate numeric values
+    if isinstance(value, (int, float)):
+        # Set reasonable bounds for configuration values
+        if name in ['max_tokens', 'temperature', 'keep_alive'] and (value < 0 or value > 100000):
+            return False
+
+    return True
 
 def _get_user_config_item(name, default, user_config):
     # 先从config.json的config中读，如果有用户配置，用用户配置覆盖，
@@ -115,7 +151,14 @@ def _get_user_config_item(name, default, user_config):
 
     c = config.get(name, default)
     if user_config:
-        return user_config.get(name, c)
+        user_value = user_config.get(name)
+        if user_value is not None:
+            if _validate_config_value(name, user_value, type(default) if default is not None else None):
+                return user_value
+            else:
+                debug(f"Invalid configuration value for '{name}', using default")
+                return c
+        return c
     return c
 
 def answer():
@@ -198,42 +241,88 @@ def answer():
     # 发起请求
     resp = None
     try:
-        resp = requests.post(api, json=history, headers=headers, stream=True)
+        # Add timeout for API requests to prevent hanging
+        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=(10, 30))
         resp.raise_for_status()
         _output_msg('assistant', '', end='')
+
+        # Validate the response before processing
+        if not hasattr(resp, 'iter_lines'):
+            debug("Invalid response object received from API")
+            return
+
         if engine_type=='haijing':
             for i in resp.iter_lines():
                 if i:
-                    print(i.decode('utf-8'))
-        if engine_type=='ali':
+                    try:
+                        decoded_line = i.decode('utf-8')
+                        print(decoded_line)
+                    except UnicodeDecodeError:
+                        debug("Skipping invalid UTF-8 sequence in response")
+                        continue
+        elif engine_type=='ali':
             for i in resp.iter_lines():
                 if i:
-                    i=i.decode('utf-8')
-                    if i.startswith('data:'):
-                        resp_s = i.split("data:", 1)[-1].strip()
-                        if resp_s == '[DONE]':
-                            break
+                    try:
+                        decoded_line = i.decode('utf-8')
+                        if decoded_line.startswith('data:'):
+                            resp_s = decoded_line.split("data:", 1)[-1].strip()
+                            if resp_s == '[DONE]':
+                                break
+                            else:
+                                try:
+                                    resp_i = json.loads(resp_s)
+                                    # Validate response structure
+                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
+                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
+                                        if delta_content:
+                                            print(delta_content, end='', flush=True)
+                                except json.JSONDecodeError:
+                                    debug(f"Invalid JSON in response: {resp_s}")
                         else:
-                            resp_i = json.loads(resp_s)
-                            resp_c = resp_i['choices'][0]['delta']['content']
-                            if resp_c:
-                                print(resp_c, end='', flush=True)
-                    else:
-                        debug(f"unknown response: {i}")
+                            debug(f"unknown response: {decoded_line}")
+                    except UnicodeDecodeError:
+                        debug("Skipping invalid UTF-8 sequence in response")
+                        continue
         elif engine_type == 'ollama':
             for i in resp.iter_lines():
                 if i:
-                    resp_i = json.loads(i.decode('utf-8'))
-                    print(resp_i['message'].get('content', ''), end='', flush=True)
+                    try:
+                        resp_i = json.loads(i.decode('utf-8'))
+                        # Validate response structure
+                        if 'message' in resp_i:
+                            content = resp_i['message'].get('content', '')
+                            if content:
+                                print(content, end='', flush=True)
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        debug(f"Error processing Ollama response: {e}")
+                        continue
         elif engine_type == 'llama':
             for i in resp.iter_lines():
                 if i:
-                    resp_i = json.loads(i.decode('utf-8'))
-                    print(resp_i['choices'][0]['message'].get('content', ''), end='', flush=True)
+                    try:
+                        resp_i = json.loads(i.decode('utf-8'))
+                        # Validate response structure
+                        if 'choices' in resp_i and len(resp_i['choices']) > 0:
+                            content = resp_i['choices'][0]['message'].get('content', '')
+                            if content:
+                                print(content, end='', flush=True)
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        debug(f"Error processing Llama response: {e}")
+                        continue
         print()
+    except requests.exceptions.Timeout:
+        print()
+        debug("API request timed out. Please check your connection and try again.")
+    except requests.exceptions.ConnectionError:
+        print()
+        debug("Connection error occurred. Please check if the API server is running and accessible.")
+    except requests.exceptions.HTTPError as e:
+        print()
+        debug(f"HTTP error occurred: {e}. Status code: {resp.status_code if resp else 'Unknown'}")
     except Exception as e:
         print()                             # 加一个换行，免得前面输出了一半就异常了
-        debug(f"error({e}. resp=${resp}");
+        debug(f"Unexpected error occurred: {e}. Response: {resp}");
 
     print(f"//updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", end='')
 
