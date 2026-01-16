@@ -1,0 +1,49 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "LLM Chat",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#user-query"
+    },
+    {
+      "include": "#configure"
+    },
+    {
+      "include": "#roles"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.llm-chat",
+          "match": "^//.*$"
+        },
+        {
+          "name": "comment.line.number-sign.llm-chat",
+          "match": "^#.*$"
+        }
+      ]
+    },
+    "user-query": {
+      "name": "markup.bold.llm-chat",
+      "match": "^User:.*$"
+    },
+    "configure": {
+      "name": "entity.name.type.llm-chat",
+      "match": "^Configure:.*$"
+    },
+    "roles": {
+      "patterns": [
+        {
+          "name": "keyword.control.llm-chat",
+          "match": "^(Assistant|System):"
+        }
+      ]
+    }
+  },
+  "scopeName": "text.llm-chat"
+}

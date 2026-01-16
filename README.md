@@ -4,6 +4,8 @@
 命令行，它的好处在于可以回退问题，也可以更改模型的回答，从而把问答推向需要控制
 的方向。
 
+**现在也支持VSCode！** 查看 [vscode/README.md](vscode/README.md) 了解VSCode插件的使用方法。
+
 ![使用截图](screenshot.png)
 
 ## 用法
@@ -97,8 +99,7 @@ A：我的目的是解决问题，现在都是我要用哪个平台我就适配�
 
 Q：为什么不适配到vscode上？
 
-A：问得好，因为我没空，而且vscode我用得很少。所以……还是欢迎其他开发者适配到
-vscode上的。
+A：现在已经支持VSCode了！查看 `vscode/` 目录获取VSCode插件。
 
 Q：为什么不解释一下config.json的其他域？
 
@@ -116,17 +117,3 @@ api地址可以不用配置之类的）。这个主要是图我自己的方便�
 ## 已知问题
 
 目前无已知问题。
-
-## Security Considerations
-
-* **API Keys**: Store API keys securely and never commit them to version control. Consider using environment variables or secure credential managers instead of storing keys directly in config.json.
-* **Configuration Validation**: Configuration values are now validated to prevent code injection and command execution attacks.
-* **Input Sanitization**: The tool validates user inputs to prevent malicious payloads from being processed.
-* **Timeout Handling**: API requests now have timeout limits to prevent hanging connections.
-
-## Best Practices
-
-* Regularly update dependencies to patch security vulnerabilities
-* Review and audit configuration files for sensitive information
-* Use strong authentication methods for API access
-* Monitor API usage for unusual patterns
