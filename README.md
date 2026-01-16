@@ -115,8 +115,7 @@ api地址可以不用配置之类的）。这个主要是图我自己的方便�
 
 ## 已知问题
 
-* 我在llama.py中调用了str.removeprefix，这是Python 3.9才有的函数，如果你用的版
-  本比这个旧，麻烦自己修改一下，实现一下这个函数。
+目前无已知问题。
 
 ## Security Considerations
 

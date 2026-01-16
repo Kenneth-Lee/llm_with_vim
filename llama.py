@@ -86,7 +86,9 @@ def _parse_input():
                         else:
                             _add_output_msg(history, role, item)   # 提交老消息
                     role = new_role                            # 切换到新角色
-                    item = line.removeprefix(_roles[new_role]) # 新角色的消息
+                    # 兼容Python 3.6+: 手动实现removeprefix
+                    prefix = _roles[new_role]
+                    item = line[len(prefix):] if line.startswith(prefix) else line
                     found = True
                     break                                     # 找到一个，其他的不用找了
 
@@ -191,6 +193,10 @@ def answer():
         if common_config['model']=='' or common_config['model']=='default':
             common_config['model'] = 'deepseek-chat'
         api = 'https://api.deepseek.com/chat/completions'
+    elif engine_type=='zhipu':
+        if common_config['model']=='' or common_config['model']=='default':
+            common_config['model'] = 'glm-4.7'
+        api = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions'
     elif engine_type=='ali':
         if common_config['model']=='' or common_config['model']=='default':
             common_config['model'] ='deepseek-r1'
@@ -235,7 +241,7 @@ def answer():
     if engine_type != 'llama':                   # llama不使用stream模式
         history["stream"] = True
 
-    # debug(f"history={history}, headers={headers}")
+    # debug(f"api={api}, history={history}, headers={headers}")
     debug("===========>\n")
 
     # 发起请求
@@ -257,6 +263,31 @@ def answer():
                     try:
                         decoded_line = i.decode('utf-8')
                         print(decoded_line)
+                    except UnicodeDecodeError:
+                        debug("Skipping invalid UTF-8 sequence in response")
+                        continue
+        elif engine_type=='zhipu':
+            for i in resp.iter_lines():
+                if i:
+                    try:
+                        decoded_line = i.decode('utf-8')
+                        if decoded_line.startswith('data:'):
+                            resp_s = decoded_line.split("data:", 1)[-1].strip()
+                            if resp_s == '[DONE]':
+                                break
+                            else:
+                                try:
+                                    resp_i = json.loads(resp_s)
+                                    # Validate response structure
+                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
+                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
+                                        if delta_content:
+                                            print(delta_content, end='', flush=True)
+                                except json.JSONDecodeError:
+                                    debug(f"Invalid JSON in response: {resp_s}")
+                        else:
+                            # Skip non-data lines (like event: lines)
+                            pass
                     except UnicodeDecodeError:
                         debug("Skipping invalid UTF-8 sequence in response")
                         continue
