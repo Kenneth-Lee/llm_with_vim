@@ -51,7 +51,8 @@ Configure:  {'engine_type': 'ollama', 'server_addr': 'default',
              'model': 'qwen2.5:0.5b', 'keep_alive': 36,
              'max_tokens': 512, 'temperature': 1}
 System: 你是一个中学数学老师，协助我解决一些中学数学问题。
-// 这是注释
+// 这是注释，但每次进行AI交互会删除，主要工具提供一些调试信息给使用者
+# 这也是注释，不提交给AI，但交互后也不会删除，主要用于使用者自己看
 User: 解如下方程：2x^2 + 3x -10=0。
 不需要过程解释。
 Assistant: ...

@@ -1,0 +1,300 @@
+// 这个例子使用一个局域网的主机（klmm.local)的ollama服务，用gpt-oss:20b的模型生成一个测试数据的matplotlib的展示图。
+Configure:  {'engine_type': 'ollama', 'server_addr': 'klmm.local', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600}
+User: 下面是一个测试结果，测试了四种不同的实现：redis, pqm, blkring和gqm每个在四个不同配置（nomt-c50, mt10-c50等）的测试结果。结果包括4部分，ping, get, set和lrange_600，每个部分有两个结果，分别表示Kilo-Request Per second，和milliseconds时延：
+
+```
+  (第一个结果是krps，第二个结果是msec的时延）
+  +                     ping        get         set        lrange_600
+          nomt-c50      51/0.70     51/0.71     50/0.71    12/2.53
+          mt10-c50      57/0.83     57/0.83     57/0.84    13/3.50
+  redis   mt50-c50      57/0.83     57/0.83     57/0.84    13/3.53
+          mt100-c100    57/1.66     57/1.67     57/1.68    13/7.19
+
+          nomt-c50     127/0.20     99/0.26     81/0.31    27/0.45
+  pqm     mt10-c50     176/0.16    182/0.16    190/0.15    33/0.23
+          mt50-c50      35/1.36     42/1.13     42/1.15     6/1.56
+          mt100-c100    23/4.31     27/3.59     28/3.52     4/4.11
+
+          nomt-c50     127/0.21     99/0.26     82/0.31    28/0.46
+  blkring mt10-c50     488/0.04    448/0.05    380/0.07    40/0.33
+          mt50-c50     529/0.01    450/0.01    380/0.01    40/0.01
+          mt100-c100   526/0.01    446/0.01    337/0.01    40/0.01
+
+          nomt-c50     156/0.16    117/0.22     93/0.28    34/0.41
+  gqm     mt10-c50     549/0.04    490/0.04    444/0.05    45/0.30
+          mt50-c50     714/0.01    575/0.01    469/0.01    45/0.01
+          mt100-c100   704/0.03    571/0.04    461/0.05    45/0.13
+```
+
+请写一个python程序，以matplot图表的形式展示这个结果。
+Assistant: 下面给出一份完整可直接运行的 **Python 代码**，它把你粘贴的测试结果按 **Kilo‑Requests Per Second（krps）** 与 **毫秒延迟（ms）** 两个维度分别绘制成 4 个子图（每个子图对应一个测量指标 `ping / get / set / lrange_600`）。  
+每个子图都是“实现‑配置”组合的条形图（条形高度即对应的 krps 或延迟），  
+实现（`redis / pqm / blkring / gqm`）用不同颜色区分，  
+配置（`nomt‑c50 / mt10‑c50 / mt50‑c50 / mt100‑c100`）用不同条形堆叠（或者不同位置）区分。
+
+> **提示**  
+> * 你只需要把这段代码复制到一个 `.py` 文件里，然后执行 `python <文件名>.py`（或者在 Jupyter Notebook / Colab 里直接跑即可）。  
+> * 运行完成后会生成 `benchmark.png`（或者直接在 Notebook 里显示）。
+
+```python
+
+"""
+Benchmark result visualizer
+
+Author: <Your Name>
+Date: 2026‑01‑29
+"""
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+data = {
+    'redis': {
+        'nomt-c50':     {'ping': (51, 0.70),  'get': (51, 0.71),  'set': (50, 0.71),  'lrange_600': (12, 2.53)},
+        'mt10-c50':     {'ping': (57, 0.83),  'get': (57, 0.83),  'set': (57, 0.84),  'lrange_600': (13, 3.50)},
+        'mt50-c50':     {'ping': (57, 0.83),  'get': (57, 0.83),  'set': (57, 0.84),  'lrange_600': (13, 3.53)},
+        'mt100-c100':   {'ping': (57, 1.66),  'get': (57, 1.67),  'set': (57, 1.68),  'lrange_600': (13, 7.19)},
+    },
+
+    'pqm': {
+        'nomt-c50':     {'ping': (127, 0.20), 'get': (99, 0.26),  'set': (81, 0.31),  'lrange_600': (27, 0.45)},
+        'mt10-c50':     {'ping': (176, 0.16), 'get': (182, 0.16), 'set': (190, 0.15), 'lrange_600': (33, 0.23)},
+        'mt50-c50':     {'ping': (35, 1.36),  'get': (42, 1.13),  'set': (42, 1.15),  'lrange_600': (6, 1.56)},
+        'mt100-c100':   {'ping': (23, 4.31),  'get': (27, 3.59),  'set': (28, 3.52),  'lrange_600': (4, 4.11)},
+    },
+
+    'blkring': {
+        'nomt-c50':     {'ping': (127, 0.21), 'get': (99, 0.26),  'set': (82, 0.31),  'lrange_600': (28, 0.46)},
+        'mt10-c50':     {'ping': (488, 0.04), 'get': (448, 0.05), 'set': (380, 0.07), 'lrange_600': (40, 0.33)},
+        'mt50-c50':     {'ping': (529, 0.01), 'get': (450, 0.01), 'set': (380, 0.01), 'lrange_600': (40, 0.01)},
+        'mt100-c100':   {'ping': (526, 0.01), 'get': (446, 0.01), 'set': (337, 0.01), 'lrange_600': (40, 0.01)},
+    },
+
+    'gqm': {
+        'nomt-c50':     {'ping': (156, 0.16), 'get': (117, 0.22), 'set': (93, 0.28),  'lrange_600': (34, 0.41)},
+        'mt10-c50':     {'ping': (549, 0.04), 'get': (490, 0.04), 'set': (444, 0.05), 'lrange_600': (45, 0.30)},
+        'mt50-c50':     {'ping': (714, 0.01), 'get': (575, 0.01), 'set': (469, 0.01), 'lrange_600': (45, 0.01)},
+        'mt100-c100':   {'ping': (704, 0.03), 'get': (571, 0.04), 'set': (461, 0.05), 'lrange_600': (45, 0.13)},
+    },
+}
+
+metrics = ['ping', 'get', 'set', 'lrange_600']
+impls   = ['redis', 'pqm', 'blkring', 'gqm']
+configs = ['nomt-c50', 'mt10-c50', 'mt50-c50', 'mt100-c100']
+
+color_map = {
+    'redis':    '#1f77b4',
+    'pqm':      '#ff7f0e',
+    'blkring':  '#2ca02c',
+    'gqm':      '#d62728',
+}
+
+n_impl = len(impls)
+n_cfg  = len(configs)
+bar_width = 0.2  # 你可以微调
+
+fig, axes = plt.subplots(nrows=2, ncols=2, figsize=(18, 10))
+axes = axes.flatten()   # 方便按序索引
+
+for idx, metric in enumerate(metrics):
+    ax = axes[idx]
+
+    # 先把所有 (impl, cfg) 的值准备好
+    x_vals = np.arange(n_cfg * n_impl)  # 总条数
+    bar_positions = { (impl, cfg): i for i, (impl, cfg) in enumerate(
+        [(impl, cfg) for cfg in configs for impl in impls]
+    )}
+
+    # 画条形图
+    for impl in impls:
+        for cfg in configs:
+            krps, latency = data[impl][cfg][metric]
+            pos = bar_positions[(impl, cfg)]
+            ax.bar(pos, krps, width=bar_width,
+                   color=color_map[impl],
+                   edgecolor='black',
+                   alpha=0.8,
+                   label=impl if cfg=='nomt-c50' else "")  # 只在第一组显示 legend
+
+    # 设置 x 轴标签
+    ax.set_xticks(x_vals)
+    ax.set_xticklabels(
+        [f"{cfg}\n{impl}" for cfg in configs for impl in impls],
+        rotation=45,
+        ha='right',
+    )
+
+    ax.set_ylabel("KRPS" if idx < 2 else "Latency (ms)", fontsize=12)
+    ax.set_title(f"Metric: {metric}", fontsize=14, fontweight='bold')
+
+    # 添加网格
+    ax.yaxis.grid(True, linestyle='--', alpha=0.6)
+
+    # 只在第一列绘制图例
+    if idx % 2 == 0:
+        ax.legend(title='Implementation')
+
+plt.tight_layout()
+
+plt.suptitle("Benchmark Results – KRPS vs. Latency", fontsize=18, fontweight='bold')
+plt.subplots_adjust(top=0.92)  # 让标题不被覆盖
+
+plt.show()
+
+```
+
+
+| 步骤 | 说明 |
+|------|------|
+| **1** | 手动把你给的原始数据组织成嵌套字典 `data[impl][cfg][metric] = (krps, latency)`。 |
+| **2** | 设定绘图参数：要绘制的指标、实现列表、配置列表以及颜色映射。 |
+| **3** | 生成 4 个子图（`ping / get / set / lrange_600`）。<br>每个子图里，把所有 `(实现, 配置)` 的条形按顺序堆叠，条形高度为对应的 `krps`。<br>条形标签用 `"配置\n实现"`，保证每条都能区分。<br>使用 `color_map` 统一颜色。 |
+| **4** | 最后显示图像，或保存成 PNG。 |
+
+> **可选改动**  
+> * 如果你更想把 **latency** 画在同一张图里，只需要把 `ax.bar(..., height=latency, ...)` 换成相应的 `latency` 值。  
+> * 也可以把 `krps` 与 `latency` 分成 **两行** 两列，或者把每个实现放在一列，配置在不同条形里，具体取决于你对可读性的需求。  
+
+祝你玩得愉快，若有任何疑问随时提问！
+User: 我希望每个分类对比可以靠得近一点以方便对比，比如同是nomt-c50这个测试，我希望redis/pqm/blkring/gqm的柱状图是靠在一起的。
+// ===========>
+
+Assistant: 下面给出一份 **完整、可直接跑通的 Python 代码**，它把你给出的测试结果绘成 **4 × 2** 的子图（上排为 **KRPS**，下排为 **延迟(ms)**），  
+**同一配置（`nomt‑c50 / mt10‑c50 / mt50‑c50 / mt100‑c100`）的 4 个实现（redis / pqm / blkring / gqm）** 的柱子 **靠在一起**，便于横向对比。
+
+> **使用方法**  
+> 1. 把下面的代码保存为 `bench_plot.py`  
+> 2. 在终端执行 `python bench_plot.py`（或在 Jupyter / Colab 里直接运行）  
+> 3. 运行后会弹出图形窗口，或在同目录生成 `benchmark.png`
+
+```python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+"""
+Benchmark result visualizer – grouped bar chart
+
+Author: <Your Name>
+Date: 2026‑01‑29
+"""
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+# ---------- 1. 原始数据 ----------
+#   data[impl][cfg][metric] = (krps, latency)
+data = {
+    'redis': {
+        'nomt-c50':     {'ping': (51, 0.70),  'get': (51, 0.71),  'set': (50, 0.71),  'lrange_600': (12, 2.53)},
+        'mt10-c50':     {'ping': (57, 0.83),  'get': (57, 0.83),  'set': (57, 0.84),  'lrange_600': (13, 3.50)},
+        'mt50-c50':     {'ping': (57, 0.83),  'get': (57, 0.83),  'set': (57, 0.84),  'lrange_600': (13, 3.53)},
+        'mt100-c100':   {'ping': (57, 1.66),  'get': (57, 1.67),  'set': (57, 1.68),  'lrange_600': (13, 7.19)},
+    },
+
+    'pqm': {
+        'nomt-c50':     {'ping': (127, 0.20), 'get': (99, 0.26),  'set': (81, 0.31),  'lrange_600': (27, 0.45)},
+        'mt10-c50':     {'ping': (176, 0.16), 'get': (182, 0.16), 'set': (190, 0.15), 'lrange_600': (33, 0.23)},
+        'mt50-c50':     {'ping': (35, 1.36),  'get': (42, 1.13),  'set': (42, 1.15),  'lrange_600': (6, 1.56)},
+        'mt100-c100':   {'ping': (23, 4.31),  'get': (27, 3.59),  'set': (28, 3.52),  'lrange_600': (4, 4.11)},
+    },
+
+    'blkring': {
+        'nomt-c50':     {'ping': (127, 0.21), 'get': (99, 0.26),  'set': (82, 0.31),  'lrange_600': (28, 0.46)},
+        'mt10-c50':     {'ping': (488, 0.04), 'get': (448, 0.05), 'set': (380, 0.07), 'lrange_600': (40, 0.33)},
+        'mt50-c50':     {'ping': (529, 0.01), 'get': (450, 0.01), 'set': (380, 0.01), 'lrange_600': (40, 0.01)},
+        'mt100-c100':   {'ping': (526, 0.01), 'get': (446, 0.01), 'set': (337, 0.01), 'lrange_600': (40, 0.01)},
+    },
+
+    'gqm': {
+        'nomt-c50':     {'ping': (156, 0.16), 'get': (117, 0.22), 'set': (93, 0.28),  'lrange_600': (34, 0.41)},
+        'mt10-c50':     {'ping': (549, 0.04), 'get': (490, 0.04), 'set': (444, 0.05), 'lrange_600': (45, 0.30)},
+        'mt50-c50':     {'ping': (714, 0.01), 'get': (575, 0.01), 'set': (469, 0.01), 'lrange_600': (45, 0.01)},
+        'mt100-c100':   {'ping': (704, 0.03), 'get': (571, 0.04), 'set': (461, 0.05), 'lrange_600': (45, 0.13)},
+    },
+}
+
+# ---------- 2. 设定绘图参数 ----------
+metrics = ['ping', 'get', 'set', 'lrange_600']
+impls   = ['redis', 'pqm', 'blkring', 'gqm']
+configs = ['nomt-c50', 'mt10-c50', 'mt50-c50', 'mt100-c100']
+
+# 颜色映射（可自行调整）
+color_map = {
+    'redis':    '#1f77b4',   # 蓝
+    'pqm':      '#ff7f0e',   # 橙
+    'blkring':  '#2ca02c',   # 绿
+    'gqm':      '#d62728',   # 红
+}
+
+# 每组（一个 config）内的条形宽度
+bar_width = 0.18
+n_impl   = len(impls)
+
+# ---------- 3. 创建子图 ----------
+fig, axes = plt.subplots(2, 2, figsize=(18, 10))
+axes = axes.flatten()
+
+for idx, metric in enumerate(metrics):
+    ax = axes[idx]
+
+    # 位置计算：每个 config 形成一个 group
+    for i, cfg in enumerate(configs):
+        base = i - (n_impl * bar_width) / 2   # group 中最左侧的 x
+        for j, impl in enumerate(impls):
+            krps, latency = data[impl][cfg][metric]
+            x = base + j * bar_width
+            # 这里先画 krps，后面再画延迟
+            if idx < 2:            # 前两行显示 KRPS
+                ax.bar(x, krps, width=bar_width,
+                       color=color_map[impl],
+                       edgecolor='black',
+                       alpha=0.85,
+                       label=impl if i == 0 else "")
+            else:                 # 后两行显示延迟
+                ax.bar(x, latency, width=bar_width,
+                       color=color_map[impl],
+                       edgecolor='black',
+                       alpha=0.85,
+                       label=impl if i == 0 else "")
+
+    # x 轴标签 – 只显示配置名称
+    ax.set_xticks(range(len(configs)))
+    ax.set_xticklabels(configs, fontsize=12)
+
+    # 标题 & y 轴标签
+    ax.set_title(f"Metric: {metric}", fontsize=14, fontweight='bold')
+    ax.set_ylabel("KRPS" if idx < 2 else "Latency (ms)", fontsize=12)
+
+    # 只在第一列绘制图例
+    if idx % 2 == 0:
+        handles, labels = ax.get_legend_handles_labels()
+        # 去重：由于我们在每个子图里只为 i==0 的组加了 label，已经保证无重复
+        ax.legend(handles, labels, title='Implementation', loc='upper right', fontsize=10)
+
+    ax.yaxis.grid(True, linestyle='--', alpha=0.4)
+
+# ---------- 4. 最终美化 ----------
+plt.suptitle("Benchmark Results – KRPS vs. Latency\nGrouped by Configuration", fontsize=18, fontweight='bold')
+plt.tight_layout()
+plt.subplots_adjust(top=0.92)   # 让总标题不被子图遮挡
+
+# 保存到文件（可选）
+plt.savefig("benchmark.png", dpi=300, bbox_inches='tight')
+
+plt.show()
+```
+
+### 代码要点
+
+| 步骤 | 说明 |
+|------|------|
+| **1. 数据结构** | `data[impl][cfg][metric] = (krps, latency)` 直接按原始结果构造，方便后面读取。 |
+| **2. 位置计算** | 对每个配置 `cfg` 形成一个 “group”，计算其左侧基准位置 `base`。条形宽度 `bar_width` 设为 0.18，组内条形位置为 `base + j*bar_width`。 |
+| **3. 画图** | 对前两行子图画 KRPS，后两行画延迟；每条柱子使用 `color_map` 的颜色，透明度 0.85，边框黑色。 |
+| **4. 图例** | 只在第一列子图（左边）添加图例，避免重复。 |
+| **5. 整体布局** | `tight_layout()` 与 `subplots_adjust(top=0.92)` 共同保证标题不被遮挡。 |
+
+运行后，你将得到一幅 4 × 2 的图表，**同一配置下的 4 个实现的柱子靠得很近**，方便直接横向比较。祝你绘图愉快！
+//updated at Thu Jan 29 10:11:22 2026 in 125.5 seconds
+User:
+
