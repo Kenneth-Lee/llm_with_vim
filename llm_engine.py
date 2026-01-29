@@ -5,15 +5,51 @@
 直接运行则调用answer()。
 模块同时提供一个辅助函数debug()，用来输出answer也会用的调试信息。
 """
-import requests
 import sys
 import time
 import signal
 import json
+import os
 
-# 读入模块配置（config.json算是代码的一部分，不能没有）
-with open('config.json', 'r', encoding='utf-8') as file:
-    _config = json.load(file)
+# 获取脚本所在目录
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+
+def debug(msg):
+    print("// " + msg)
+
+def _check_environment():
+    """检查必须的Python包是否已安装"""
+    missing_packages = []
+    try:
+        import requests
+    except ImportError:
+        missing_packages.append('requests')
+
+    if missing_packages:
+        debug("环境检查失败：缺少必须的Python包")
+        debug("缺失的包: " + ", ".join(missing_packages))
+        debug("请运行: pip install " + " ".join(missing_packages))
+        sys.exit(1)
+
+# 检查环境
+_check_environment()
+
+# 现在可以安全导入requests
+import requests
+
+# 读入模块配置（llm_engine.json算是代码的一部分，不能没有）
+# 从脚本所在目录读取llm_engine.json
+_config_path = os.path.join(_script_dir, 'llm_engine.json')
+try:
+    with open(_config_path, 'r', encoding='utf-8') as file:
+        _config = json.load(file)
+except FileNotFoundError:
+    debug(f"错误: 找不到配置文件 {_config_path}")
+    debug("请确保 llm_engine.json 与 llm_engine.py 在同一目录")
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    debug(f"错误: llm_engine.json 格式错误: {e}")
+    sys.exit(1)
 
 _ollama_addr_alias = _config["ollama_addr_alias"]
 _ollama_model_alias = _config["ollama_model_alias"]
@@ -50,9 +86,6 @@ def _sig_handler(signal, frame):
     sys.exit(0)
 
 signal.signal(signal.SIGINT, _sig_handler)
-
-def debug(msg):
-    print("// " + msg)
 
 def _parse_input():
     """

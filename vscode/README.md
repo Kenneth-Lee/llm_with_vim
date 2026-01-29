@@ -107,10 +107,10 @@ User: 继续提问
 
 ## 配置说明
 
-插件会使用父目录的`config.json`和`llama.py`脚本。确保：
+插件会使用父目录的`llm_engine.json`和`llm_engine.py`脚本。确保：
 - Python 3.6+已安装
-- 父目录的config.json配置正确
-- llama.py可执行
+- 父目录的llm_engine.json配置正确
+- llm_engine.py可执行
 
 ## 与Vim版本的区别
 
@@ -123,8 +123,8 @@ User: 继续提问
 
 ## 已知限制
 
-- 目前仅支持.txt文件
-- 需要Python和llama.py脚本支持
+- 目前仅支持.llm文件
+- 需要Python和llm_engine.py脚本支持
 - 不支持Vim版本的所有语法功能（如abbreviations）
 
 ## 开发

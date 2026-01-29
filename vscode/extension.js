@@ -6,6 +6,61 @@ const fs = require('fs');
 let currentProcess = null;
 
 /**
+ * 查找llm_engine.py的路径
+ * 搜索顺序: 1. 扩展目录 2. 扩展父目录 3. PATH环境变量
+ */
+function findLLMEngine(extensionPath) {
+    // 1. 检查扩展目录
+    let enginePath = path.join(extensionPath, 'llm_engine.py');
+    if (fs.existsSync(enginePath)) {
+        return enginePath;
+    }
+    
+    // 2. 检查扩展父目录
+    enginePath = path.join(extensionPath, '..', 'llm_engine.py');
+    if (fs.existsSync(enginePath)) {
+        return enginePath;
+    }
+    
+    // 3. 检查PATH中是否有llm_engine.py
+    // 尝试在当前工作目录
+    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
+        enginePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'llm_engine.py');
+        if (fs.existsSync(enginePath)) {
+            return enginePath;
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * 检查Python环境
+ */
+function checkPythonEnvironment(pythonPath, scriptPath) {
+    return new Promise((resolve, reject) => {
+        const testProcess = spawn(pythonPath, ['-c', 'import requests; import json']);
+        
+        let errorOutput = '';
+        testProcess.stderr.on('data', (data) => {
+            errorOutput += data.toString();
+        });
+        
+        testProcess.on('close', (code) => {
+            if (code === 0) {
+                resolve(true);
+            } else {
+                reject(new Error('Python环境缺少必需的包。请运行: pip install requests'));
+            }
+        });
+        
+        testProcess.on('error', (err) => {
+            reject(new Error(`无法启动Python: ${err.message}`));
+        });
+    });
+}
+
+/**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
@@ -27,7 +82,7 @@ function activate(context) {
         const inputText = document.getText(range);
 
         // 找到Python可执行文件路径
-        const pythonPath = 'python3';
+        const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
         
         // 解析符号链接，获取真实路径
         let realExtensionPath = context.extensionPath;
@@ -37,8 +92,22 @@ function activate(context) {
             // 如果解析失败，使用原路径
         }
         
-        // llama.py的路径（在父目录）
-        const scriptPath = path.join(realExtensionPath, '..', 'llama.py');
+        // 查找llm_engine.py
+        const scriptPath = findLLMEngine(realExtensionPath);
+        if (!scriptPath) {
+            vscode.window.showErrorMessage(
+                'llm_engine.py 未找到。请将其放在扩展目录、工作区根目录或PATH中。'
+            );
+            return;
+        }
+
+        // 检查Python环境
+        try {
+            await checkPythonEnvironment(pythonPath, scriptPath);
+        } catch (err) {
+            vscode.window.showErrorMessage(`环境检查失败: ${err.message}`);
+            return;
+        }
 
         // 显示状态消息
         vscode.window.withProgress({
@@ -48,9 +117,8 @@ function activate(context) {
         }, (progress, token) => {
             return new Promise((resolve, reject) => {
                 // 启动Python进程
-                currentProcess = spawn(pythonPath, [scriptPath], {
-                    cwd: path.join(realExtensionPath, '..')
-                });
+                const cwd = path.dirname(scriptPath);
+                currentProcess = spawn(pythonPath, [scriptPath], { cwd });
 
                 let outputBuffer = '';
                 let errorBuffer = '';

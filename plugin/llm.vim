@@ -1,24 +1,87 @@
+" LLM Chat Plugin for Vim
 " 重复加载检查
-if exists("g:llama_story_enable")
+if exists("g:llm_engine_loaded")
 	finish
 endif
-let g:llama_story_enable = 1
+let g:llm_engine_loaded = 1
 
-" 检查工作环境
-let envcheck = system("./testenv.sh")
-if v:shell_error != 0
-	echo "环境检查失败：" . envcheck
-	finish
-endif
+" 查找llm_engine.py的路径
+" 搜索顺序: 1. 插件目录 2. PATH环境变量
+function! s:FindLLMEngine()
+	" 1. 检查插件目录
+	let l:script_dir = expand('<sfile>:p:h')
+	let l:engine_path = l:script_dir . '/llm_engine.py'
+	if filereadable(l:engine_path)
+		return l:engine_path
+	endif
+	
+	" 检查插件父目录（兼容plugin/子目录结构）
+	let l:parent_dir = fnamemodify(l:script_dir, ':h')
+	let l:engine_path = l:parent_dir . '/llm_engine.py'
+	if filereadable(l:engine_path)
+		return l:engine_path
+	endif
+	
+	" 2. 检查PATH中是否有llm_engine.py
+	if executable('llm_engine.py')
+		return 'llm_engine.py'
+	endif
+	
+	" 3. 检查当前工作目录
+	if filereadable('llm_engine.py')
+		return 'llm_engine.py'
+	endif
+	
+	return ''
+endfunction
+
+" 检查环境是否有效
+function! s:CheckEnvironment()
+	" 检查Python
+	if !executable('python3') && !executable('python')
+		return {'ok': 0, 'msg': 'Python 3 未安装或不在PATH中'}
+	endif
+	
+	" 检查llm_engine.py
+	let l:engine = s:FindLLMEngine()
+	if empty(l:engine)
+		return {'ok': 0, 'msg': 'llm_engine.py 未找到。请将其放在插件目录或PATH中'}
+	endif
+	
+	" 测试Python环境（检查requests包）
+	let l:python_cmd = executable('python3') ? 'python3' : 'python'
+	let l:test_cmd = l:python_cmd . ' -c "import requests; import json"'
+	let l:result = system(l:test_cmd)
+	if v:shell_error != 0
+		return {'ok': 0, 'msg': 'Python环境缺少必需的包。请运行: pip install requests'}
+	endif
+	
+	return {'ok': 1, 'engine': l:engine, 'python': l:python_cmd}
+endfunction
+
+" 全局变量存储环境检查结果
+let s:env_status = {'checked': 0, 'ok': 0}
 
 " outline的文件名（该文件不需要保存）
 let s:outline_bname = 'diaglog-outline.buffer'
 
-" 把[1,当前行]发入llama.py获取输出
-function DoGen()
+" 把[1,当前行]发入llm_engine.py获取输出
+function! DoGen()
+	" 检查环境
+	if !s:env_status.checked || !s:env_status.ok
+		let s:env_status = s:CheckEnvironment()
+		let s:env_status.checked = 1
+		if !s:env_status.ok
+			echohl ErrorMsg
+			echo '错误: ' . s:env_status.msg
+			echohl None
+			return
+		endif
+	endif
+	
 	" 保存开头到当前位置到临时Buffer中作为输入
 	let content = join(getline(1, '.'), "\n")
-	let l:temp_buf = bufnr('temp_llama_input', 1)
+	let l:temp_buf = bufnr('temp_llm_input', 1)
 	call bufload(l:temp_buf)
 	call setbufline(l:temp_buf, 1, split(content, "\n"))
 
@@ -50,8 +113,11 @@ function DoGen()
 		let l:interrupted = 2
 	endfunction
 
+	" 构建命令
+	let l:cmd = s:env_status.python . ' ' . s:env_status.engine
+
 	" 异步请求LLM
-	let l:job = job_start('python3 llama.py', {
+	let l:job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
 		\ 'out_cb': function('HandleOutput'),
@@ -151,12 +217,23 @@ function! OpenDiaglogOutline()
 
 	execute l:ocline
 
-	execute "nmap <buffer> <CR> :call OutlineGotoLine(line('.'))<CR>"
+	execute "nmap <buffer> <CR> :call DiaglogOutlineGotoLine(line('.'))<CR>"
 	execute "nmap <buffer> q :q!<CR>:bd " . s:outline_bname . "<CR>"
 	execute "nmap <buffer> <F2> :q!<CR>:bd " . s:outline_bname . "<CR>"
 endfunction
 
-function Setting()
+function! s:SetupLLMBuffer()
+	" 检查环境并显示错误（如果有）
+	if !s:env_status.checked
+		let s:env_status = s:CheckEnvironment()
+		let s:env_status.checked = 1
+		if !s:env_status.ok
+			echohl WarningMsg
+			echo 'LLM插件环境检查失败: ' . s:env_status.msg
+			echohl None
+		endif
+	endif
+	
 	" syntax本来就是针对当前Buffer的
 	syn match comment "^#.*$"
 	syn match comment "^//.*$"
@@ -178,8 +255,8 @@ function Setting()
 	setlocal complete+=kspell
 endfunction
 
-" 对文本文件实现LLM的故事逻辑
-augroup story_txt
+" 对.llm文件实现LLM的交互逻辑
+augroup llm_filetype
   autocmd!
-  autocmd BufRead,BufNewFile *.txt,*.tmp call Setting()
+  autocmd FileType llm call s:SetupLLMBuffer()
 augroup END
