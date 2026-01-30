@@ -15,13 +15,13 @@ function findLLMEngine(extensionPath) {
     if (fs.existsSync(enginePath)) {
         return enginePath;
     }
-    
+
     // 2. 检查扩展父目录
     enginePath = path.join(extensionPath, '..', 'llm_engine.py');
     if (fs.existsSync(enginePath)) {
         return enginePath;
     }
-    
+
     // 3. 检查PATH中是否有llm_engine.py
     // 尝试在当前工作目录
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
@@ -30,7 +30,7 @@ function findLLMEngine(extensionPath) {
             return enginePath;
         }
     }
-    
+
     return null;
 }
 
@@ -40,12 +40,12 @@ function findLLMEngine(extensionPath) {
 function checkPythonEnvironment(pythonPath, scriptPath) {
     return new Promise((resolve, reject) => {
         const testProcess = spawn(pythonPath, ['-c', 'import requests; import json']);
-        
+
         let errorOutput = '';
         testProcess.stderr.on('data', (data) => {
             errorOutput += data.toString();
         });
-        
+
         testProcess.on('close', (code) => {
             if (code === 0) {
                 resolve(true);
@@ -53,7 +53,7 @@ function checkPythonEnvironment(pythonPath, scriptPath) {
                 reject(new Error('Python环境缺少必需的包。请运行: pip install requests'));
             }
         });
-        
+
         testProcess.on('error', (err) => {
             reject(new Error(`无法启动Python: ${err.message}`));
         });
@@ -66,6 +66,33 @@ function checkPythonEnvironment(pythonPath, scriptPath) {
 function activate(context) {
     console.log('LLM Chat Assistant extension is now active');
 
+    // 创建状态栏项，显示扩展已激活
+    const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    statusBarItem.text = "$(comment-discussion) LLM Chat";
+    statusBarItem.tooltip = "LLM Chat Assistant 已激活";
+    context.subscriptions.push(statusBarItem);
+
+    // 监听活动编辑器变化，仅在.llm文件中显示状态栏
+    function updateStatusBar() {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document.languageId === 'llm-chat') {
+            statusBarItem.show();
+        } else {
+            statusBarItem.hide();
+        }
+    }
+
+    // 初始更新和监听器
+    updateStatusBar();
+    vscode.window.onDidChangeActiveTextEditor(updateStatusBar, null, context.subscriptions);
+
+    // 显示激活消息（仅在打开.llm文件时）
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+        if (editor && editor.document.languageId === 'llm-chat') {
+            vscode.window.showInformationMessage('LLM Chat Assistant 已激活');
+        }
+    }, null, context.subscriptions);
+
     // 注册提交查询命令
     let submitCommand = vscode.commands.registerCommand('llm-chat.submitQuery', async function () {
         const editor = vscode.window.activeTextEditor;
@@ -76,14 +103,14 @@ function activate(context) {
 
         const document = editor.document;
         const currentLine = editor.selection.active.line;
-        
+
         // 获取从文档开头到当前行的所有文本
         const range = new vscode.Range(0, 0, currentLine, document.lineAt(currentLine).text.length);
         const inputText = document.getText(range);
 
         // 找到Python可执行文件路径
         const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
-        
+
         // 解析符号链接，获取真实路径
         let realExtensionPath = context.extensionPath;
         try {
@@ -91,7 +118,7 @@ function activate(context) {
         } catch (err) {
             // 如果解析失败，使用原路径
         }
-        
+
         // 查找llm_engine.py
         const scriptPath = findLLMEngine(realExtensionPath);
         if (!scriptPath) {
@@ -149,7 +176,7 @@ function activate(context) {
                 // 进程完成
                 currentProcess.on('close', (code) => {
                     currentProcess = null;
-                    
+
                     if (code === 0) {
                         // 删除当前内容，替换为输出
                         editor.edit(editBuilder => {

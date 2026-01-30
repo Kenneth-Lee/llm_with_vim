@@ -2,8 +2,12 @@
   "name": "llm-with-vscode",
   "displayName": "LLM Chat Assistant",
   "description": "Interactive LLM conversation tool for VSCode, supporting multiple LLM engines",
-  "version": "0.1.0",
+  "version": "1.0.20260129",
   "publisher": "llm-with-vim",
+  "repository": {
+    "type": "git",
+    "url": "https://gitee.com/Kenneth-Lee-2012/llm_with_vim.git"
+  },
   "engines": {
     "vscode": "^1.60.0"
   },
@@ -11,9 +15,16 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:plaintext"
+    "onLanguage:llm-chat"
   ],
   "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "llm_engine.py",
+    "llm_engine.json",
+    "syntaxes/",
+    "LICENSE"
+  ],
   "contributes": {
     "commands": [
       {
@@ -32,24 +43,24 @@
     "keybindings": [
       {
         "command": "llm-chat.submitQuery",
-        "key": "f1",
-        "when": "editorTextFocus && resourceExtname == .txt"
+        "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == llm-chat"
       },
       {
         "command": "llm-chat.stopGeneration",
         "key": "shift+k",
-        "when": "editorTextFocus && resourceExtname == .txt"
+        "when": "editorTextFocus && editorLangId == llm-chat"
       },
       {
         "command": "llm-chat.showOutline",
         "key": "f2",
-        "when": "editorTextFocus && resourceExtname == .txt"
+        "when": "editorTextFocus && editorLangId == llm-chat"
       }
     ],
     "languages": [
       {
         "id": "llm-chat",
-        "extensions": [".txt"],
+        "extensions": [".llm"],
         "aliases": ["LLM Chat"]
       }
     ],
