@@ -149,14 +149,36 @@ function activate(context) {
 
                 let outputBuffer = '';
                 let errorBuffer = '';
+                let lastUpdateLength = 0;
 
                 // 发送输入
                 currentProcess.stdin.write(inputText);
                 currentProcess.stdin.end();
 
-                // 处理输出
+                // 处理输出 - 实时更新
                 currentProcess.stdout.on('data', (data) => {
                     outputBuffer += data.toString();
+
+                    // 实时更新编辑器内容
+                    editor.edit(editBuilder => {
+                        // 删除之前的内容
+                        const fullRange = new vscode.Range(
+                            0, 0,
+                            editor.document.lineCount - 1,
+                            editor.document.lineAt(editor.document.lineCount - 1).text.length
+                        );
+                        editBuilder.delete(fullRange);
+                        // 插入新内容
+                        editBuilder.insert(new vscode.Position(0, 0), outputBuffer);
+                    }).then(() => {
+                        // 滚动到文档末尾
+                        const lastLine = editor.document.lineCount - 1;
+                        const lastLineLength = editor.document.lineAt(lastLine).text.length;
+                        editor.selection = new vscode.Selection(lastLine, lastLineLength, lastLine, lastLineLength);
+                        editor.revealRange(new vscode.Range(lastLine, 0, lastLine, 0));
+                    });
+
+                    lastUpdateLength = outputBuffer.length;
                 });
 
                 // 处理错误
@@ -178,9 +200,14 @@ function activate(context) {
                     currentProcess = null;
 
                     if (code === 0) {
-                        // 删除当前内容，替换为输出
+                        // 最终确保内容完整
                         editor.edit(editBuilder => {
-                            editBuilder.delete(range);
+                            const fullRange = new vscode.Range(
+                                0, 0,
+                                editor.document.lineCount - 1,
+                                editor.document.lineAt(editor.document.lineCount - 1).text.length
+                            );
+                            editBuilder.delete(fullRange);
                             editBuilder.insert(new vscode.Position(0, 0), outputBuffer);
                         }).then(() => {
                             // 在末尾添加新的User提示
