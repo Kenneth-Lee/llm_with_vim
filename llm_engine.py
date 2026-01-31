@@ -87,6 +87,62 @@ def _sig_handler(signal, frame):
 
 signal.signal(signal.SIGINT, _sig_handler)
 
+def _process_inc_directive(line, base_dir=''):
+    """
+    处理 @inc 指令。
+    格式: @inc <filename>
+    读取指定文件内容并返回。
+    相对路径相对于 base_dir（如果有）或当前工作目录。
+    """
+    # 解析 @inc 指令，格式: @inc <filename>
+    parts = line.strip().split(None, 1)
+    if len(parts) < 2:
+        debug(f"Invalid @inc directive: {line.strip()}")
+        return ""
+
+    filename = parts[1].strip()
+
+    # 验证文件名，防止路径遍历攻击
+    # 不允许绝对路径和父目录引用
+    if os.path.isabs(filename):
+        debug(f"@inc: absolute paths are not allowed: {filename}")
+        return ""
+
+    # 检查是否有父目录引用
+    if '..' in filename:
+        debug(f"@inc: path traversal is not allowed: {filename}")
+        return ""
+
+    # 构建完整路径
+    if base_dir:
+        file_path = os.path.join(base_dir, filename)
+    else:
+        file_path = filename
+
+    # 规范化路径
+    file_path = os.path.normpath(file_path)
+
+    # 防止路径遍历（规范化后不应该有..，但再检查一次）
+    if '..' in file_path:
+        debug(f"@inc: path traversal is not allowed: {filename}")
+        return ""
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            # 打印包含提示信息
+            print(f"// @inc: included file '{filename}'")
+            return content
+    except FileNotFoundError:
+        debug(f"@inc: file not found: {filename}")
+        return ""
+    except IOError as e:
+        debug(f"@inc: error reading file {filename}: {e}")
+        return ""
+    except UnicodeDecodeError:
+        debug(f"@inc: file encoding error: {filename}")
+        return ""
+
 def _parse_input():
     """
     处理stdin的输入信息。返回history,config。
@@ -108,6 +164,11 @@ def _parse_input():
             continue
         elif line.startswith("#"):
             print(line)                         # 注释，原封不动保留
+        elif line.startswith("@inc "):
+            # 处理 @inc 指令：读取文件内容并添加到当前角色消息中
+            file_content = _process_inc_directive(line)
+            if file_content:
+                item = item + file_content + '\n'
         else:                                   # 其他认为是有效输入
             found = False
             for new_role in _roles.keys():       # 一个个匹配是否是新的角色
