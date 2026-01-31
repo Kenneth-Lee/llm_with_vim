@@ -8,12 +8,12 @@
    ```bash
    # 创建必要的目录
    mkdir -p ~/.vim/plugin ~/.vim/ftdetect
-   
-   # 复制插件文件
+
+   # 复制插件文件（llm_engine.py 必须与 llm.vim 在同一目录）
    cp plugin/llm.vim ~/.vim/plugin/
+   cp llm_engine.py ~/.vim/plugin/
    cp ftdetect/llm.vim ~/.vim/ftdetect/
-   cp llm_engine.py ~/.vim/
-   cp llm_engine.json ~/.vim/
+   cp config.json ~/.vim/
    ```
 
 2. **安装 Python 依赖**：
@@ -44,26 +44,26 @@ Plugin 'your-username/llm_with_vim'
 ```
 ~/.vim/
 ├── plugin/
-│   └── llm.vim          # 主插件文件
+│   ├── llm.vim          # 主插件文件
+│   └── llm_engine.py    # LLM 引擎脚本（必须与 llm.vim 同目录）
 ├── ftdetect/
 │   └── llm.vim          # 文件类型检测
-├── llm_engine.py        # LLM 引擎脚本
-└── llm_engine.json      # 配置文件
+└── config.json          # 配置文件
 ```
 
 ### llm_engine.py 的查找路径
 
 插件会按以下顺序查找 `llm_engine.py`：
-1. 插件目录（`~/.vim/plugin/llm_engine.py`）
+1. 插件目录（`~/.vim/plugin/llm_engine.py`）- **推荐**
 2. 插件父目录（`~/.vim/llm_engine.py`）
 3. PATH 环境变量
 4. 当前工作目录
 
-**推荐做法**：将 `llm_engine.py` 和 `llm_engine.json` 放在 `~/.vim/` 目录下。
+**重要**：`llm_engine.py` 必须与 `llm.vim` 放在同一目录，或者放在上述查找路径中的某个位置。
 
-### 配置 llm_engine.json
+### 配置 config.json
 
-编辑 `~/.vim/llm_engine.json` 设置默认 LLM 引擎：
+编辑 `~/.vim/config.json` 设置默认 LLM 引擎：
 ```json
 {
   "config": {
@@ -159,15 +159,15 @@ code --install-extension llm-chat-0.1.0.vsix
 ### Vim: "llm_engine.py 未找到"
 
 解决方法：
-1. 确认 `llm_engine.py` 在 `~/.vim/` 目录下
+1. 确认 `llm_engine.py` 和 `llm.vim` 在同一目录（如 `~/.vim/plugin/`）
 2. 或者将其添加到 PATH 环境变量
 3. 或者放在当前工作目录
 
-### "找不到配置文件 llm_engine.json"
+### "找不到配置文件 config.json"
 
 解决方法：
-1. 确认 `llm_engine.json` 与 `llm_engine.py` 在同一目录
-2. 如果 `llm_engine.py` 在 `~/.vim/`，那么 `llm_engine.json` 也应该在 `~/.vim/`
+1. 确认 `config.json` 与 `llm_engine.py` 在同一目录
+2. 如果 `llm_engine.py` 在 `~/.vim/plugin/`，那么 `config.json` 也应该在 `~/.vim/plugin/` 或 `~/.vim/`
 
 ### "Python环境缺少必需的包"
 
@@ -193,7 +193,7 @@ Configure: {'engine_type': 'deepseek', 'auth': 'Bearer sk-xxxxxxxx'}
 
 ### 多引擎配置
 
-编辑 `llm_engine.json` 的 `auth_keys` 部分：
+编辑 `config.json` 的 `auth_keys` 部分：
 ```json
 {
   "auth_keys": {
@@ -204,4 +204,4 @@ Configure: {'engine_type': 'deepseek', 'auth': 'Bearer sk-xxxxxxxx'}
 }
 ```
 
-**注意**：建议将 API 密钥配置在每个 `.llm` 文件的 Configure 行中，而不是 `llm_engine.json`，因为后者可能在更新时被覆盖。
+**注意**：建议将 API 密钥配置在每个 `.llm` 文件的 Configure 行中，而不是 `config.json`，因为后者可能在更新时被覆盖。

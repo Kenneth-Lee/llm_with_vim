@@ -5,33 +5,35 @@ if exists("g:llm_engine_loaded")
 endif
 let g:llm_engine_loaded = 1
 
+" 保存插件所在目录（必须在加载时确定）
+let s:plugin_dir = expand('<sfile>:p:h')
+
 " 查找llm_engine.py的路径
 " 搜索顺序: 1. 插件目录 2. PATH环境变量
 function! s:FindLLMEngine()
 	" 1. 检查插件目录
-	let l:script_dir = expand('<sfile>:p:h')
-	let l:engine_path = l:script_dir . '/llm_engine.py'
+	let l:engine_path = s:plugin_dir . '/llm_engine.py'
 	if filereadable(l:engine_path)
 		return l:engine_path
 	endif
-	
+
 	" 检查插件父目录（兼容plugin/子目录结构）
-	let l:parent_dir = fnamemodify(l:script_dir, ':h')
+	let l:parent_dir = fnamemodify(s:plugin_dir, ':h')
 	let l:engine_path = l:parent_dir . '/llm_engine.py'
 	if filereadable(l:engine_path)
 		return l:engine_path
 	endif
-	
+
 	" 2. 检查PATH中是否有llm_engine.py
 	if executable('llm_engine.py')
 		return 'llm_engine.py'
 	endif
-	
+
 	" 3. 检查当前工作目录
 	if filereadable('llm_engine.py')
 		return 'llm_engine.py'
 	endif
-	
+
 	return ''
 endfunction
 
