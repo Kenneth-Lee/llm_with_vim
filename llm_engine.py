@@ -1,159 +1,86 @@
-#!python
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+LLM Engine - 处理.llm文件并发送给LLM服务
+"""
 
-"""
-本模块提供函数answer()，以供从stdin生成LLM请求，并把输入和输出合并输出到stdout。
-直接运行则调用answer()。
-模块同时提供一个辅助函数debug()，用来输出answer也会用的调试信息。
-"""
+from __future__ import print_function
 import sys
-import time
-import signal
 import json
+import time
 import os
-
-# 获取脚本所在目录
-_script_dir = os.path.dirname(os.path.abspath(__file__))
-
-def debug(msg):
-    print("// " + msg)
-
-def _check_environment():
-    """检查必须的Python包是否已安装"""
-    missing_packages = []
-    try:
-        import requests
-    except ImportError:
-        missing_packages.append('requests')
-
-    if missing_packages:
-        debug("环境检查失败：缺少必须的Python包")
-        debug("缺失的包: " + ", ".join(missing_packages))
-        debug("请运行: pip install " + " ".join(missing_packages))
-        sys.exit(1)
-
-# 检查环境
-_check_environment()
-
-# 现在可以安全导入requests
 import requests
+import signal
 
-# 读入模块配置（llm_engine.json算是代码的一部分，不能没有）
-# 从脚本所在目录读取llm_engine.json
-_config_path = os.path.join(_script_dir, 'llm_engine.json')
-try:
-    with open(_config_path, 'r', encoding='utf-8') as file:
-        _config = json.load(file)
-except FileNotFoundError:
-    debug(f"错误: 找不到配置文件 {_config_path}")
-    debug("请确保 llm_engine.json 与 llm_engine.py 在同一目录")
-    sys.exit(1)
-except json.JSONDecodeError as e:
-    debug(f"错误: llm_engine.json 格式错误: {e}")
-    sys.exit(1)
+# Python 2/3 兼容
+if sys.version_info[0] == 2:
+    import ConfigParser as configparser
+else:
+    import configparser
 
-_ollama_addr_alias = _config["ollama_addr_alias"]
-_ollama_model_alias = _config["ollama_model_alias"]
-_roles = _config["roles"]
+# 全局配置
+_config = None
 
-# 一些中间处理函数
+# Ollama地址别名
+_ollama_addr_alias = {
+    'default': 'localhost',
+    'home': '192.168.31.100',
+    'aliyun': '47.98.228.76',
+    'txyun': '43.139.74.214',
+}
+
+# Ollama模型别名
+_ollama_model_alias = {
+    'qwen': 'qwen2.5:0.5b',
+    'llama': 'llama3.2:1b',
+    'deepseek': 'deepseek-r1:1.5b',
+}
+
+# 角色前缀定义
+_roles = {
+    "system":    "System: ",
+    "user":      "User: ",
+    "assistant": "Assistant: ",
+    "config":    "Configure: ",
+}
+
+def _load_config():
+    """加载配置文件"""
+    global _config
+    if _config is None:
+        config_file = os.path.join(os.path.dirname(__file__), 'llm_engine.json')
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                _config = json.load(f)
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"Error loading config: {e}", file=sys.stderr)
+            sys.exit(1)
+    return _config
 
 def _make_ollama_api(host, api='chat'):
+    """构建Ollama API地址"""
     if host.startswith("http"):
-        return host+api
+        return host + api
     else:
         return 'http://' + host + ':11434/api/' + api
 
+def debug(msg):
+    """输出调试信息到stdout（作为注释）"""
+    print(f"// {msg}")
+
 def _add_msg(req, role, content):
-    "给请求增加某个角色的消息"
-    if content:
-        req['messages'].append({"role":role, "content":content.strip()})
-
-def _output_msg(role, content, end='\n'):
-    "输出某个角色的消息"
-    if role in _roles.keys():
-        role_msg = _roles[role]
-    else:
-        role_msg = role + ": "
-    print(role_msg, content.strip(), sep='', end=end)
-
-def _add_output_msg(req, role, content):
-    _add_msg(req, role, content)
-    _output_msg(role, content)
-
-# 处理Ctrl-C
-def _sig_handler(signal, frame):
-    print(r"\generation interrupted")
-    sys.exit(0)
-
-signal.signal(signal.SIGINT, _sig_handler)
-
-def _process_inc_directive(line, base_dir=''):
-    """
-    处理 @inc 指令。
-    格式: @inc <filename>
-    读取指定文件内容并返回。
-    相对路径相对于 base_dir（如果有）或当前工作目录。
-    """
-    # 解析 @inc 指令，格式: @inc <filename>
-    parts = line.strip().split(None, 1)
-    if len(parts) < 2:
-        debug(f"Invalid @inc directive: {line.strip()}")
-        return ""
-
-    filename = parts[1].strip()
-
-    # 验证文件名，防止路径遍历攻击
-    # 不允许绝对路径和父目录引用
-    if os.path.isabs(filename):
-        debug(f"@inc: absolute paths are not allowed: {filename}")
-        return ""
-
-    # 检查是否有父目录引用
-    if '..' in filename:
-        debug(f"@inc: path traversal is not allowed: {filename}")
-        return ""
-
-    # 构建完整路径
-    if base_dir:
-        file_path = os.path.join(base_dir, filename)
-    else:
-        file_path = filename
-
-    # 规范化路径
-    file_path = os.path.normpath(file_path)
-
-    # 防止路径遍历（规范化后不应该有..，但再检查一次）
-    if '..' in file_path:
-        debug(f"@inc: path traversal is not allowed: {filename}")
-        return ""
-
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-            # 打印包含提示信息
-            print(f"// @inc: included file '{filename}'")
-            return content
-    except FileNotFoundError:
-        debug(f"@inc: file not found: {filename}")
-        return ""
-    except IOError as e:
-        debug(f"@inc: error reading file {filename}: {e}")
-        return ""
-    except UnicodeDecodeError:
-        debug(f"@inc: file encoding error: {filename}")
-        return ""
+    """给请求增加某个角色的消息"""
+    if content and content.strip():
+        req['messages'].append({"role": role, "content": content.strip()})
 
 def _parse_input():
     """
-    处理stdin的输入信息。返回history,config。
-    前者是将要发送的请求，后者是输入中提供的配置
+    处理stdin的输入信息。返回history, config。
 
-    使用堆栈处理@inc指令：
-    - 堆栈每个元素保存 (lines, line_idx, base_dir, depth, is_main_file)
-    - 遇到@inc时，压栈当前状态，开始处理被包含的文件
-    - 被包含文件的内容需要全部添加到 history
-    - 主文件的 @inc 行保留在输出中（不发送给LLM）
-    - 最大深度限制为10，防止无限循环
+    核心设计：
+    - 所有文件（主文件和头文件）都一行一行顺序处理
+    - 维护当前角色状态，延续内容追加到当前角色
+    - 遇到@inc时压栈，处理完头文件后弹栈继续，保持角色状态连续
     """
     global _config
     history = _config["request_template"]
@@ -164,108 +91,99 @@ def _parse_input():
     main_lines = sys.stdin.readlines()
 
     # 堆栈：每个元素是 (lines, line_idx, base_dir, depth, is_main_file)
-    # is_main_file: 标记是否是主文件（用于控制输出）
-    # 初始：主文件，从第0行开始，空目录，深度0，是主文件
     stack = [(main_lines, 0, '', 0, True)]
     MAX_DEPTH = 10
 
-    # 当前角色的发言内容
-    role = 'none'
-    item = ''
+    # 状态机状态
+    current_role = 'none'   # 当前角色
+    current_content = ''    # 当前角色累积的内容
+    role_outputted = False  # 当前角色是否已输出到output_lines
 
-    # 收集需要输出的行（只来自主文件，保持@inc指令原样）
+    # 输出收集
     output_lines = []
 
-    # 临时存储被包含文件展开后的内容
-    # 格式: {depth: [(role, content), ...]}
-    # 当弹栈时，把这些内容添加到 history
-    inc_content_cache = {}
+    # 标记主文件是否输出了Config
+    main_file_has_config = False
 
-    # 追踪上一行是否是角色行（用于处理延续内容不加前缀）
-    last_was_role_line = False
+    def flush_role():
+        """提交当前角色的内容"""
+        nonlocal user_config, current_role, current_content, role_outputted, main_file_has_config
+
+        if not current_content.strip():
+            return
+
+        content = current_content
+
+        if current_role == 'config':
+            # Config 更新 user_config（后覆盖前）
+            user_config = content.strip()
+        elif current_role != 'none':
+            # 其他角色添加到 history
+            _add_msg(history, current_role, content)
+
+        # 重置当前内容
+        current_content = ''
+        role_outputted = False
+
+    def output_line(is_main_file, line_to_output):
+        """输出一行内容到output_lines（仅主文件）"""
+        nonlocal main_file_has_config, current_role, role_outputted
+
+        if not is_main_file:
+            return
+
+        if not line_to_output.strip():
+            output_lines.append(line_to_output)
+            return
+
+        if current_role == 'config':
+            if not role_outputted:
+                output_lines.append(_roles['config'] + line_to_output.strip() + '\n')
+                main_file_has_config = True
+                role_outputted = True
+            else:
+                output_lines.append(line_to_output)
+        elif current_role != 'none':
+            if not role_outputted:
+                # 第一次输出该角色，添加角色前缀
+                role_msg = _roles.get(current_role, current_role + ": ")
+                output_lines.append(role_msg + line_to_output)
+                role_outputted = True
+            else:
+                # 延续内容，不加前缀
+                output_lines.append(line_to_output)
 
     while stack:
         current_lines, line_idx, base_dir, depth, is_main_file = stack[-1]
 
         # 检查是否当前文件处理完毕
         if line_idx >= len(current_lines):
-            # 弹栈前，处理最后的内容
-            current_depth = stack[-1][3]
-            if item.strip():
-                if stack and stack[0][4]:  # 主文件
-                    if role == 'config':
-                        user_config = item.strip()
-                        output_lines.append(_roles['config'] + user_config + '\n')
-                        last_was_role_line = True
-                    else:
-                        if last_was_role_line and history['messages']:
-                            # 延续内容，追加到上一条消息
-                            last_msg = history['messages'][-1]
-                            last_msg['content'] += item
-                        else:
-                            _add_msg(history, role, item)
-                        # 输出
-                        if last_was_role_line:
-                            output_lines.append(item)
-                        else:
-                            if role in _roles.keys():
-                                role_msg = _roles[role]
-                            else:
-                                role_msg = role + ": "
-                            output_lines.append(role_msg + item)
-                        last_was_role_line = True
-                else:
-                    # 被包含文件
-                    if role == 'config':
-                        # 配置只添加到缓存，不设置 user_config
-                        clean_item = item.strip()
-                        if clean_item and current_depth in inc_content_cache:
-                            inc_content_cache[current_depth].append(('config', clean_item))
-                    elif role != 'none' and current_depth in inc_content_cache:
-                        # 只有有效角色才添加到缓存
-                        inc_content_cache[current_depth].append((role, item))
-                item = ''
-                role = 'none'  # 重置角色
-
-            # 弹栈前，把被包含文件的内容添加到 history
-            if not is_main_file and current_depth in inc_content_cache:
-                for r, c in inc_content_cache[current_depth]:
-                    if r == 'config':
-                        # 配置只用于设置 user_config，不添加到 LLM 请求
-                        if user_config is None:
-                            user_config = c
-                    else:
-                        _add_msg(history, r, c)
-                del inc_content_cache[current_depth]
-
+            # 弹栈，继续处理上一个文件
             stack.pop()
-            # 如果是主文件处理完毕，结束循环
             if not stack:
+                # 所有文件处理完毕
+                flush_role()
                 break
             continue
 
         line = current_lines[line_idx]
-
-        # 更新堆栈当前位置
         stack[-1] = (current_lines, line_idx + 1, base_dir, depth, is_main_file)
 
         # 处理不同类型的行
         if line.startswith("/"):                # 调试信息，忽略
             continue
-        elif line.startswith("#"):
-            if is_main_file:
-                output_lines.append(line)       # 注释，原封不动保留（仅主文件）
-                last_was_role_line = False
-        elif line.startswith("@inc "):
-            # 处理 @inc 指令
-            # 根据设计文档：
-            # 1. @inc 指令在输出中保持原样（不展开）- 添加到 output_lines（仅主文件）
-            # 2. 展开的内容需要发送给 LLM
 
+        elif line.startswith("#"):              # 注释
+            flush_role()
             if is_main_file:
-                # 输出保持 @inc 指令原样（仅主文件的@inc会被输出）
                 output_lines.append(line)
-                last_was_role_line = False
+            current_role = 'none'
+
+        elif line.startswith("@inc "):           # @inc 原语
+            flush_role()
+            if is_main_file:
+                output_lines.append(line)
+            current_role = 'none'
 
             # 检查深度限制
             if depth >= MAX_DEPTH:
@@ -281,114 +199,81 @@ def _parse_input():
             filename = parts[1].strip()
 
             # 验证文件名
-            if os.path.isabs(filename):
-                debug(f"@inc: absolute paths are not allowed: {filename}")
-                continue
-            if '..' in filename:
-                debug(f"@inc: path traversal is not allowed: {filename}")
+            if os.path.isabs(filename) or '..' in filename:
+                debug(f"@inc: invalid path: {filename}")
                 continue
 
             # 构建完整路径
-            if base_dir:
-                file_path = os.path.join(base_dir, filename)
-            else:
-                file_path = filename
+            file_path = os.path.join(base_dir, filename) if base_dir else filename
             file_path = os.path.normpath(file_path)
             if '..' in file_path:
-                debug(f"@inc: path traversal is not allowed: {filename}")
+                debug(f"@inc: path traversal not allowed: {filename}")
                 continue
 
             # 读取被包含的文件
             try:
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
-            except FileNotFoundError:
-                debug(f"@inc: file not found: {filename}")
-                continue
-            except IOError as e:
-                debug(f"@inc: error reading file {filename}: {e}")
-                continue
-            except UnicodeDecodeError:
-                debug(f"@inc: file encoding error: {filename}")
+            except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
+                debug(f"@inc: error reading {filename}: {e}")
                 continue
 
-            # 获取被包含文件的目录（用于其中的相对路径）
+            # 获取被包含文件的目录
             file_dir = os.path.dirname(filename)
             new_base_dir = file_dir if file_dir else base_dir
 
-            # 将被包含的文件压栈，继续处理其内容（只用于 LLM，不加入 output）
+            # 压栈处理头文件
             inc_lines = content.splitlines(keepends=True)
-            stack.append((inc_lines, 0, new_base_dir, depth + 1, False))  # False = 不是主文件
+            stack.append((inc_lines, 0, new_base_dir, depth + 1, False))
 
-            # 初始化被包含文件内容的缓存
-            inc_content_cache[depth + 1] = []
+        else:                                   # 普通内容行
+            # 检查是否是新角色
+            found_role = None
+            for role_name, role_prefix in _roles.items():
+                if line.startswith(role_prefix):
+                    found_role = role_name
+                    break
 
-        else:                                   # 其他认为是有效输入
-            found = False
-            for new_role in _roles.keys():       # 一个个匹配是否是新的角色
-                if line.startswith(_roles[new_role]):          # 匹配上了
-                    # 提交上一个角色的内容（如果有）
-                    if role != 'none':
-                        if role == 'config':
-                            user_config = item.strip()         # 实例配置信息
-                            if is_main_file:
-                                output_lines.append(_roles[role] + user_config + '\n')
-                                last_was_role_line = True
-                        else:
-                            # 添加到 history 或缓存
-                            if is_main_file:
-                                if last_was_role_line and history['messages']:
-                                    # 延续内容，追加到上一条消息
-                                    last_msg = history['messages'][-1]
-                                    last_msg['content'] += item
-                                else:
-                                    _add_msg(history, role, item)
-                                # 输出角色和内容
-                                if role in _roles.keys():
-                                    role_msg = _roles[role]
-                                else:
-                                    role_msg = role + ": "
-                                if last_was_role_line:
-                                    output_lines.append(item)
-                                else:
-                                    output_lines.append(role_msg + item)
-                                last_was_role_line = True
-                            else:
-                                # 被包含文件的内容先缓存，弹栈时再添加到 history
-                                if depth in inc_content_cache:
-                                    inc_content_cache[depth].append((role, item))
-                    elif not is_main_file and item.strip():
-                        # 第一个角色且不是主文件，把内容也缓存
-                        # (role 是 'none'，但 item 可能有内容)
-                        if depth in inc_content_cache:
-                            inc_content_cache[depth].append(('none', item))
+            if found_role:
+                # 新角色，提交当前角色内容
+                flush_role()
+                current_role = found_role
+                # 提取内容（去掉角色前缀）
+                prefix = _roles[found_role]
+                current_content = line[len(prefix):] if line.startswith(prefix) else line
+                # 头文件中的新角色定义需要标记已输出（虽然不真实输出到output_lines）
+                if not is_main_file:
+                    role_outputted = True
+                    # 如果头文件中有config角色，也标记主文件已有config
+                    if found_role == 'config':
+                        main_file_has_config = True
+                else:
+                    # 主文件的新角色定义直接输出原始行（已包含前缀）
+                    output_lines.append(line)
+                    role_outputted = True
+                    # 如果是config角色，标记主文件已有config
+                    if found_role == 'config':
+                        main_file_has_config = True
+            else:
+                # 延续当前角色
+                current_content += line
+                # 延续行只有主文件输出
+                if is_main_file:
+                    output_line(is_main_file, line)
 
-                    role = new_role                            # 切换到新角色
-                    # 兼容Python 3.6+: 手动实现removeprefix
-                    prefix = _roles[new_role]
-                    item = line[len(prefix):] if line.startswith(prefix) else line
-                    found = True
-                    break                                     # 找到一个，其他的不用找了
+    # 所有文件处理完毕，如果主文件没有Config但有user_config，插入到开头
+    if not main_file_has_config and user_config:
+        output_lines.insert(0, _roles['config'] + user_config + '\n')
 
-            if not found:                   # 没有找到，整行作为老角色的延续发言
-                item = item + line
-
-    # 文件处理完毕，处理最后一个角色的内容（已在上层循环处理过）
-
-    # 输出所有收集的行（保持@inc指令原样）
+    # 输出所有收集的行
     sys.stdout.write(''.join(output_lines))
 
     if user_config:
         try:
-            # Use json.loads instead of eval for safety
-            # First, try to parse as JSON directly
             import ast
-            # Try JSON parsing first (strict)
             try:
                 uc = json.loads(user_config)
             except json.JSONDecodeError:
-                # If that fails, try ast.literal_eval as a safer alternative to eval
-                # This handles Python dict syntax like {'key': 'value'}
                 uc = ast.literal_eval(user_config)
 
             if not isinstance(uc, dict):
@@ -406,28 +291,22 @@ def _validate_config_value(name, value, expected_type=None):
     if expected_type and not isinstance(value, expected_type):
         return False
 
-    # Validate strings for potential command injection
     if isinstance(value, str):
-        # Check for potential command injection patterns
         dangerous_patterns = [';', '|', '&', '`', '$(', '${', '\x00']
         for pattern in dangerous_patterns:
             if pattern in value:
                 return False
-        # Ensure reasonable length limits
-        if len(value) > 10000:  # Prevent extremely long values
+        if len(value) > 10000:
             return False
 
-    # Validate numeric values
     if isinstance(value, (int, float)):
-        # Set reasonable bounds for configuration values
         if name in ['max_tokens', 'temperature', 'keep_alive'] and (value < 0 or value > 100000):
             return False
 
     return True
 
 def _get_user_config_item(name, default, user_config):
-    # 先从config.json的config中读，如果有用户配置，用用户配置覆盖，
-    # 如果都没有配置，就给初值。
+    """获取配置项，优先级：用户配置 > 全局配置 > 默认值"""
     global _config
     config = _config["config"]
 
@@ -444,16 +323,17 @@ def _get_user_config_item(name, default, user_config):
     return c
 
 def answer():
+    """主函数：处理输入并发送给LLM"""
     global _config
+    _load_config()
 
-    # 时间统计
     start_time = time.time()
 
-    # 先处理输入，其中可能包含配置
+    # 处理输入
     history, user_config = _parse_input()
 
-    # api请求头部
-    headers = { 'Content-Type':'application/json'}
+    # API请求头部
+    headers = {'Content-Type': 'application/json'}
 
     # 组合配置
     common_config = _config['default_config']
@@ -464,32 +344,32 @@ def answer():
     if engine_type == "ollama":
         keep_alive = _get_user_config_item("keep_alive", 60, user_config)
 
-    # 根据引擎类型设置默认参数，调整别名
-    if engine_type=='haijing':
-        if common_config['model']=='' or common_config['model']=='default':
+    # 根据引擎类型设置默认参数
+    if engine_type == 'haijing':
+        if common_config['model'] == '' or common_config['model'] == 'default':
             common_config['model'] = 'DeepSeek-R1'
         api = 'https://api.atalk-ai.com/chat/completions'
-    elif engine_type=='deepseek':
-        if common_config['model']=='' or common_config['model']=='default':
+    elif engine_type == 'deepseek':
+        if common_config['model'] == '' or common_config['model'] == 'default':
             common_config['model'] = 'deepseek-chat'
         api = 'https://api.deepseek.com/chat/completions'
-    elif engine_type=='zhipu':
-        if common_config['model']=='' or common_config['model']=='default':
+    elif engine_type == 'zhipu':
+        if common_config['model'] == '' or common_config['model'] == 'default':
             common_config['model'] = 'glm-4.7'
-        api = 'https://open.bigmodel.cn/api/coding/paas/v4/chat/completions'
-    elif engine_type=='ali':
-        if common_config['model']=='' or common_config['model']=='default':
-            common_config['model'] ='deepseek-r1'
+        api = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
+    elif engine_type == 'ali':
+        if common_config['model'] == '' or common_config['model'] == 'default':
+            common_config['model'] = 'deepseek-r1'
         api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
-    elif engine_type=='llama':
+    elif engine_type == 'llama':
         api = 'http://' + server_addr + '/v1/chat/completions'
-    elif engine_type=='ollama' or engine_type=='default':
-        engine_type='ollama'
-        if common_config['model']=='' or common_config['model']=='default':
-            common_config['model'] ='qwen2.5:0.5b'
+    elif engine_type == 'ollama' or engine_type == 'default':
+        engine_type = 'ollama'
+        if common_config['model'] == '' or common_config['model'] == 'default':
+            common_config['model'] = 'qwen2.5:0.5b'
         server_addr = _ollama_addr_alias.get(server_addr, server_addr)
         common_config['model'] = _ollama_model_alias.get(
-                common_config['model'], common_config['model'])
+            common_config['model'], common_config['model'])
         api = _make_ollama_api(server_addr)
     else:
         print(f'未知引擎{engine_type}')
@@ -497,56 +377,49 @@ def answer():
 
     # 没有给用户配置的生成一个
     if not user_config:
-        user_config = common_config.copy()    # 以common配置为基础（不能直接用，两者不重合）
+        user_config = common_config.copy()
         user_config["engine_type"] = engine_type
         user_config["server_addr"] = server_addr
         if engine_type == 'ollama':
             user_config["keep_alive"] = keep_alive
-        print(_roles['config'], user_config)
+        debug(f"{_roles['config']} {user_config}")
 
-    # api key需要特殊处理一下，用户配置没有的话，看看有没有全局配置
-    if not (engine_type in ['ollama', 'llama']):
+    # API key处理
+    if engine_type not in ['ollama', 'llama']:
         auth = user_config.get('auth', None)
         if not auth:
             auth_keys = _config.get("auth_keys", {})
-            auth = auth_keys[engine_type]
-        headers['Authorization'] = auth
-        # debug(f"change head with {auth}")
+            auth = auth_keys.get(engine_type, '')
+        if auth:
+            headers['Authorization'] = auth
 
     # 根据配置完善请求记录
     for key in common_config.keys():
         history[key] = common_config[key]
     if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
-    if engine_type != 'llama':                   # llama不使用stream模式
+    if engine_type != 'llama':
         history["stream"] = True
 
-    debug(f"api={api}, history={history}, headers={headers}")
-    debug("===========>\n")
+    # debug(f"api={api}, history={history}, headers={headers}")
+    debug("===========>")
 
     # 发起请求
     resp = None
     try:
-        # Add timeout for API requests to prevent hanging
         resp = requests.post(api, json=history, headers=headers, stream=True, timeout=(10, 30))
         resp.raise_for_status()
-        _output_msg('assistant', '', end='')
 
-        # Validate the response before processing
-        if not hasattr(resp, 'iter_lines'):
-            debug("Invalid response object received from API")
-            return
-
-        if engine_type=='haijing':
+        print(_roles['assistant'], end='', flush=True)
+        if engine_type == 'haijing':
             for i in resp.iter_lines():
                 if i:
                     try:
                         decoded_line = i.decode('utf-8')
                         print(decoded_line)
                     except UnicodeDecodeError:
-                        debug("Skipping invalid UTF-8 sequence in response")
                         continue
-        elif engine_type=='zhipu':
+        elif engine_type == 'zhipu':
             for i in resp.iter_lines():
                 if i:
                     try:
@@ -558,20 +431,15 @@ def answer():
                             else:
                                 try:
                                     resp_i = json.loads(resp_s)
-                                    # Validate response structure
                                     if 'choices' in resp_i and len(resp_i['choices']) > 0:
                                         delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
                                         if delta_content:
                                             print(delta_content, end='', flush=True)
                                 except json.JSONDecodeError:
-                                    debug(f"Invalid JSON in response: {resp_s}")
-                        else:
-                            # Skip non-data lines (like event: lines)
-                            pass
+                                    pass
                     except UnicodeDecodeError:
-                        debug("Skipping invalid UTF-8 sequence in response")
                         continue
-        elif engine_type=='ali':
+        elif engine_type == 'ali':
             for i in resp.iter_lines():
                 if i:
                     try:
@@ -583,57 +451,49 @@ def answer():
                             else:
                                 try:
                                     resp_i = json.loads(resp_s)
-                                    # Validate response structure
                                     if 'choices' in resp_i and len(resp_i['choices']) > 0:
                                         delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
                                         if delta_content:
                                             print(delta_content, end='', flush=True)
                                 except json.JSONDecodeError:
-                                    debug(f"Invalid JSON in response: {resp_s}")
-                        else:
-                            debug(f"unknown response: {decoded_line}")
+                                    pass
                     except UnicodeDecodeError:
-                        debug("Skipping invalid UTF-8 sequence in response")
                         continue
         elif engine_type == 'ollama':
             for i in resp.iter_lines():
                 if i:
                     try:
                         resp_i = json.loads(i.decode('utf-8'))
-                        # Validate response structure
                         if 'message' in resp_i:
                             content = resp_i['message'].get('content', '')
                             if content:
                                 print(content, end='', flush=True)
-                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                        debug(f"Error processing Ollama response: {e}")
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
         elif engine_type == 'llama':
             for i in resp.iter_lines():
                 if i:
                     try:
                         resp_i = json.loads(i.decode('utf-8'))
-                        # Validate response structure
                         if 'choices' in resp_i and len(resp_i['choices']) > 0:
                             content = resp_i['choices'][0]['message'].get('content', '')
                             if content:
                                 print(content, end='', flush=True)
-                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-                        debug(f"Error processing Llama response: {e}")
+                    except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
         print()
     except requests.exceptions.Timeout:
         print()
-        debug("API request timed out. Please check your connection and try again.")
+        debug("API request timed out.")
     except requests.exceptions.ConnectionError:
         print()
-        debug("Connection error occurred. Please check if the API server is running and accessible.")
+        debug("Connection error occurred.")
     except requests.exceptions.HTTPError as e:
         print()
-        debug(f"HTTP error occurred: {e}. Status code: {resp.status_code if resp else 'Unknown'}")
+        debug(f"HTTP error occurred: {e}")
     except Exception as e:
-        print()                             # 加一个换行，免得前面输出了一半就异常了
-        debug(f"Unexpected error occurred: {e}. Response: {resp}");
+        print()
+        debug(f"Unexpected error occurred: {e}")
 
     print(f"//updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", end='')
 
