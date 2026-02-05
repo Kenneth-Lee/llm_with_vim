@@ -239,9 +239,9 @@ function! s:SetupLLMBuffer()
 	" syntax本来就是针对当前Buffer的
 	syn match comment "^#.*$"
 	syn match comment "^//.*$"
-	syn match Search "^User: .*$"
 	syn match Title "^Configure: .*$"
-	syn keyword Type Assistant System
+	syn keyword Type Assistant System inc
+	syn keyword Keyword User
 
 	" 给当前buffer设置热键
 	nmap <buffer> j gj
@@ -253,6 +253,10 @@ function! s:SetupLLMBuffer()
 
 	ab <buffer> WAns Write a new scene:
 	ab <buffer> ITns In the next scene,
+	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': '主机名', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600}
+	ab <buffer> configAli Configure: {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxx'}
+	ab <buffer> configHj Configure:  {'engine_type': 'haijing', 'auth': 'Basic xxxxxxxxxxxxxxxxxxxxxxxxxxx'}
+	ab <buffer> configZp Configure:  {'engine_type': 'zhipu', 'auth': 'Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx', 'max_tokens': 10240, 'temperature': 1}
 	setlocal spell
 	setlocal complete+=kspell
 endfunction
