@@ -43,13 +43,13 @@ function! s:CheckEnvironment()
 	if !executable('python3') && !executable('python')
 		return {'ok': 0, 'msg': 'Python 3 未安装或不在PATH中'}
 	endif
-	
+
 	" 检查llm_engine.py
 	let l:engine = s:FindLLMEngine()
 	if empty(l:engine)
 		return {'ok': 0, 'msg': 'llm_engine.py 未找到。请将其放在插件目录或PATH中'}
 	endif
-	
+
 	" 测试Python环境（检查requests包）
 	let l:python_cmd = executable('python3') ? 'python3' : 'python'
 	let l:test_cmd = l:python_cmd . ' -c "import requests; import json"'
@@ -57,7 +57,7 @@ function! s:CheckEnvironment()
 	if v:shell_error != 0
 		return {'ok': 0, 'msg': 'Python环境缺少必需的包。请运行: pip install requests'}
 	endif
-	
+
 	return {'ok': 1, 'engine': l:engine, 'python': l:python_cmd}
 endfunction
 
@@ -80,10 +80,14 @@ function! DoGen()
 			return
 		endif
 	endif
-	
+
+	" 为每个buffer创建唯一的临时buffer名称
+	let l:current_buf = bufnr('%')
+	let l:temp_buf_name = 'temp_llm_input_' . l:current_buf
+
 	" 保存开头到当前位置到临时Buffer中作为输入
 	let content = join(getline(1, '.'), "\n")
-	let l:temp_buf = bufnr('temp_llm_input', 1)
+	let l:temp_buf = bufnr(l:temp_buf_name, 1)
 	call bufload(l:temp_buf)
 	call setbufline(l:temp_buf, 1, split(content, "\n"))
 
@@ -235,7 +239,7 @@ function! s:SetupLLMBuffer()
 			echohl None
 		endif
 	endif
-	
+
 	" syntax本来就是针对当前Buffer的
 	syn match comment "^#.*$"
 	syn match comment "^//.*$"

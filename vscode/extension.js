@@ -3,7 +3,8 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-let currentProcess = null;
+// 使用Map来跟踪每个文档的进程，key是文档URI
+let documentProcesses = new Map();
 
 /**
  * 查找llm_engine.py的路径
@@ -136,6 +137,18 @@ function activate(context) {
             return;
         }
 
+        // 获取当前文档的URI作为唯一标识
+        const documentUri = document.uri.toString();
+
+        // 如果当前文档已经有正在运行的进程，先停止它
+        if (documentProcesses.has(documentUri)) {
+            const existingProcess = documentProcesses.get(documentUri);
+            if (existingProcess && !existingProcess.killed) {
+                existingProcess.kill();
+            }
+            documentProcesses.delete(documentUri);
+        }
+
         // 显示状态消息
         vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -145,18 +158,19 @@ function activate(context) {
             return new Promise((resolve, reject) => {
                 // 启动Python进程
                 const cwd = path.dirname(scriptPath);
-                currentProcess = spawn(pythonPath, [scriptPath], { cwd });
+                const process = spawn(pythonPath, [scriptPath], { cwd });
+                documentProcesses.set(documentUri, process);
 
                 let outputBuffer = '';
                 let errorBuffer = '';
                 let lastUpdateLength = 0;
 
                 // 发送输入
-                currentProcess.stdin.write(inputText);
-                currentProcess.stdin.end();
+                process.stdin.write(inputText);
+                process.stdin.end();
 
                 // 处理输出 - 实时更新
-                currentProcess.stdout.on('data', (data) => {
+                process.stdout.on('data', (data) => {
                     outputBuffer += data.toString();
 
                     // 实时更新编辑器内容
@@ -182,22 +196,25 @@ function activate(context) {
                 });
 
                 // 处理错误
-                currentProcess.stderr.on('data', (data) => {
+                process.stderr.on('data', (data) => {
                     errorBuffer += data.toString();
                 });
 
                 // 处理取消
                 token.onCancellationRequested(() => {
-                    if (currentProcess) {
-                        currentProcess.kill();
-                        currentProcess = null;
+                    if (documentProcesses.has(documentUri)) {
+                        const proc = documentProcesses.get(documentUri);
+                        if (proc && !proc.killed) {
+                            proc.kill();
+                        }
+                        documentProcesses.delete(documentUri);
                         reject(new Error('Generation cancelled by user'));
                     }
                 });
 
                 // 进程完成
-                currentProcess.on('close', (code) => {
-                    currentProcess = null;
+                process.on('close', (code) => {
+                    documentProcesses.delete(documentUri);
 
                     if (code === 0) {
                         // 最终确保内容完整
@@ -224,8 +241,8 @@ function activate(context) {
                 });
 
                 // 处理进程错误
-                currentProcess.on('error', (err) => {
-                    currentProcess = null;
+                process.on('error', (err) => {
+                    documentProcesses.delete(documentUri);
                     vscode.window.showErrorMessage(`Failed to start LLM process: ${err.message}`);
                     reject(err);
                 });
@@ -235,12 +252,24 @@ function activate(context) {
 
     // 注册停止生成命令
     let stopCommand = vscode.commands.registerCommand('llm-chat.stopGeneration', function () {
-        if (currentProcess) {
-            currentProcess.kill();
-            currentProcess = null;
-            vscode.window.showInformationMessage('LLM generation stopped');
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            vscode.window.showInformationMessage('No active editor');
+            return;
+        }
+
+        const documentUri = editor.document.uri.toString();
+        if (documentProcesses.has(documentUri)) {
+            const process = documentProcesses.get(documentUri);
+            if (process && !process.killed) {
+                process.kill();
+                documentProcesses.delete(documentUri);
+                vscode.window.showInformationMessage('LLM generation stopped');
+            } else {
+                vscode.window.showInformationMessage('No active LLM generation for this document');
+            }
         } else {
-            vscode.window.showInformationMessage('No active LLM generation');
+            vscode.window.showInformationMessage('No active LLM generation for this document');
         }
     });
 
@@ -292,10 +321,13 @@ function activate(context) {
 }
 
 function deactivate() {
-    if (currentProcess) {
-        currentProcess.kill();
-        currentProcess = null;
+    // 清理所有正在运行的进程
+    for (const [uri, process] of documentProcesses.entries()) {
+        if (process && !process.killed) {
+            process.kill();
+        }
     }
+    documentProcesses.clear();
 }
 
 module.exports = {
