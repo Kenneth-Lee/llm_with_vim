@@ -344,6 +344,11 @@ def answer():
     if engine_type == "ollama":
         keep_alive = _get_user_config_item("keep_alive", 60, user_config)
 
+    # 获取超时配置
+    connect_timeout = common_config.get('connect_timeout', 30)
+    read_timeout = common_config.get('read_timeout', 1800)
+    timeout = (connect_timeout, read_timeout)
+
     # 根据引擎类型设置默认参数
     if engine_type == 'haijing':
         if common_config['model'] == '' or common_config['model'] == 'default':
@@ -381,6 +386,51 @@ def answer():
         debug(f"API地址: {api}")
         engine_type = 'openai_compat'
 
+    # API key处理（提前处理，以便模型查询时使用）
+    if engine_type not in ['ollama', 'llama']:
+        auth = user_config.get('auth', None) if user_config else None
+        if not auth:
+            auth_keys = _config.get("auth_keys", {})
+            auth = auth_keys.get(engine_type, '')
+        if auth:
+            headers['Authorization'] = auth
+
+    # 如果 model 为 "request"，查询可用模型列表
+    if common_config['model'] == 'TELLME':
+        models = []
+        try:
+            if engine_type == 'ollama':
+                # Ollama 使用 /api/tags 查询模型
+                tags_api = _make_ollama_api(server_addr, 'tags')
+                resp = requests.get(tags_api, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                if 'models' in data:
+                    models = [m['name'] for m in data['models']]
+            elif engine_type in ['openai_compat', 'llama']:
+                # OpenAI 兼容引擎使用 /v1/models 查询模型
+                models_api = api.rsplit('/', 2)[0] + '/v1/models'
+                req_headers = {}
+                if 'Authorization' in headers:
+                    req_headers['Authorization'] = headers['Authorization']
+                resp = requests.get(models_api, headers=req_headers, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                if 'data' in data:
+                    models = [m['id'] for m in data['data']]
+        except Exception as e:
+            print(f"// 查询模型失败: {e}")
+            sys.exit(0)
+
+        if models:
+            print(f"// 可用模型列表 (共 {len(models)} 个):")
+            for m in models:
+                print(f"//   {m}")
+            print("// 请将 Configure 中的 model 设置为上述模型之一")
+        else:
+            print("// 未找到可用模型")
+        sys.exit(0)
+
     # 没有给用户配置的生成一个
     if not user_config:
         user_config = common_config.copy()
@@ -389,15 +439,6 @@ def answer():
         if engine_type == 'ollama':
             user_config["keep_alive"] = keep_alive
         debug(f"{_roles['config']} {user_config}")
-
-    # API key处理
-    if engine_type not in ['ollama', 'llama']:
-        auth = user_config.get('auth', None)
-        if not auth:
-            auth_keys = _config.get("auth_keys", {})
-            auth = auth_keys.get(engine_type, '')
-        if auth:
-            headers['Authorization'] = auth
 
     # 根据配置完善请求记录
     for key in common_config.keys():             # 所有common_config中的配置导入请求中
@@ -414,7 +455,7 @@ def answer():
     resp = None
     response_completed = False
     try:
-        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=(30, 300))
+        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=timeout)
         resp.raise_for_status()
 
         print(_roles['assistant'], end='', flush=True)

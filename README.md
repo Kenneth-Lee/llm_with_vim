@@ -25,7 +25,7 @@
 
 ## 用法
 
-安装方法具体[INSTALL.md](INSTALL.md)，这里主要介绍原理。
+安装方法请具体参考[INSTALL.md](INSTALL.md)，这里主要介绍原理。
 
 程序的主体是一个python程序，llm_engine.py，它要正常工作，需要在同一个目录上有一
 个llm_engine.json作为配置。值得修改的主要是下面这个部分：
@@ -44,6 +44,9 @@
 简单的用法是这样：
 ```
 echo "hello" | python llm_engine.py
+```
+或者
+```
 python llm_engine.py < chat.llm
 ```
 这会打印输入的内容，然后补上LLM模型的回答。
@@ -60,16 +63,16 @@ Configure:  {'engine_type': 'ollama', 'server_addr': 'default',
              'model': 'qwen2.5:0.5b', 'keep_alive': 36,
              'max_tokens': 512, 'temperature': 1}
 System: 你是一个中学数学老师，协助我解决一些中学数学问题。
-// 这是注释，但每次进行AI交互会删除，主要工具提供一些调试信息给使用者
+// 这是注释，但每次进行AI交互会删除，主要用于工具提供一些调试信息给使用者
 # 这也是注释，不提交给AI，但交互后也不会删除，主要用于使用者自己看
 User: 解如下方程：2x^2 + 3x -10=0。
 不需要过程解释。
 Assistant: ...
-User: ....
+User: 有没有其他解法？
 ....
 ```
-除了User，其他部分都是可选的，System是给整个对话定调。User后面是你的问题，
-Assistant是LLM的回答。
+除了User，其他部分都是可选的，System是给整个对话定调，通常用来定义AI的身份认知。
+User后面是你的问题，Assistant是LLM的回答。
 
 如果你在某个User后面输入jj，或者在Normal模式按\<F1\>，llm.vim定义的脚本会把从
 文件开始到当前User提问的整个上下文提交给LLM，并把LLM的回答显示在当前User问题后
@@ -83,7 +86,7 @@ Configure的部分可以修改默认的llm_engine.json配置，如果你没有�
 候会根据当前配置给你生成一个，你可以基于这个生成的部分修改相关参数。
 
 ollama之外的平台普遍需要apikey，这个可以配置在llm_engine.json的auth\_keys中，但这个
-属于主线维护的一部分，升级版本会冲掉，所以更建议配置每个文本文件的Configure中，
+属于主线维护的一部分，升级版本会冲掉，所以更建议配置在每个文本文件的Configure中，
 名字叫auth就可以了。比如这样：
 ```
 Configure:  {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'}
@@ -98,6 +101,18 @@ Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任�
 这样，你用vim编辑任何一个工程，需要LLM配合，就创建一个llm文件，然后在里面控制会
 话，结果拷贝回其他文件就行。
 
-## 已知问题
+## 一些技巧
 
-* 现在要用的平台越来越多，后续会考虑把每种平台做成一个python文件的插件。
+* 部分引擎（比如ollama）支持引擎查询，如果你不知道模型的名字，可以把模型名字设
+  置为TELLME，这样插件会给你返回具体有哪些模型可以用。
+
+* ollama第一次使用某个模型会比较慢，可能因此会超时，可以通过如下Configure参数调
+  整超时时间（以秒为单位）：
+
+  * keep_alive=60。定义模型使用后，在内存中保留多久
+  * connect_timeout=30。定义连接超时时间
+  * read_timeout=1800。定义请求超时时间
+
+## 当前支持的引擎
+
+todo
