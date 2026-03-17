@@ -8,8 +8,8 @@
 
 	"config-comment": {
 		"comment": "这是config部分的注释",
-		"engine_type": "llama|ollama|deepseek|haijing|zhipu|ali",
-		"server_addr": "服务器的主机名，别名参考ollama_addr_alias",
+		"engine_type": "ollama|deepseek|haijing|zhipu|ali|llama|任意名称(OpenAI兼容)",
+		"server_addr": "服务器的主机名或地址，OpenAI兼容引擎需指定 host:port",
 		"model": "模型名，别名参考ollama_model_alias",
 		"keep_alive": "保持服务数据激活的时间（秒为单位）"
 	},

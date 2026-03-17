@@ -363,8 +363,7 @@ def answer():
         api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
     elif engine_type == 'llama':
         api = 'http://' + server_addr + '/v1/chat/completions'
-    elif engine_type == 'ollama' or engine_type == 'default':
-        engine_type = 'ollama'
+    elif engine_type == 'ollama':
         if common_config['model'] == '' or common_config['model'] == 'default':
             common_config['model'] = 'qwen2.5:0.5b'
         server_addr = _ollama_addr_alias.get(server_addr, server_addr)
@@ -372,8 +371,15 @@ def answer():
             common_config['model'], common_config['model'])
         api = _make_ollama_api(server_addr)
     else:
-        print(f'未知引擎{engine_type}')
-        sys.exit(0)
+        # 未知引擎作为默认的 OpenAI 兼容引擎处理（支持 vLLM 等）
+        # server_addr 格式: host:port 或完整 URL
+        debug(f"使用 OpenAI 兼容引擎: {engine_type}")
+        if server_addr.startswith("http"):
+            api = server_addr.rstrip('/') + '/v1/chat/completions'
+        else:
+            api = 'http://' + server_addr + '/v1/chat/completions'
+        debug(f"API地址: {api}")
+        engine_type = 'openai_compat'
 
     # 没有给用户配置的生成一个
     if not user_config:
@@ -394,7 +400,7 @@ def answer():
             headers['Authorization'] = auth
 
     # 根据配置完善请求记录
-    for key in common_config.keys():
+    for key in common_config.keys():             # 所有common_config中的配置导入请求中
         history[key] = common_config[key]
     if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
@@ -406,8 +412,9 @@ def answer():
 
     # 发起请求
     resp = None
+    response_completed = False
     try:
-        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=(10, 30))
+        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=(30, 300))
         resp.raise_for_status()
 
         print(_roles['assistant'], end='', flush=True)
@@ -481,13 +488,37 @@ def answer():
                                 print(content, end='', flush=True)
                     except (json.JSONDecodeError, UnicodeDecodeError):
                         continue
+        else:
+            # OpenAI 兼容引擎（vLLM 等）的流式响应处理
+            for i in resp.iter_lines():
+                if i:
+                    try:
+                        decoded_line = i.decode('utf-8')
+                        if decoded_line.startswith('data:'):
+                            resp_s = decoded_line.split("data:", 1)[-1].strip()
+                            if resp_s == '[DONE]':
+                                break
+                            else:
+                                try:
+                                    resp_i = json.loads(resp_s)
+                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
+                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
+                                        if delta_content:
+                                            print(delta_content, end='', flush=True)
+                                except json.JSONDecodeError:
+                                    pass
+                    except UnicodeDecodeError:
+                        continue
+        response_completed = True
         print()
     except requests.exceptions.Timeout:
         print()
-        debug("API request timed out.")
+        if not response_completed:
+            debug("API request timed out.")
     except requests.exceptions.ConnectionError:
         print()
-        debug("Connection error occurred.")
+        if not response_completed:
+            debug("Connection error occurred.")
     except requests.exceptions.HTTPError as e:
         print()
         debug(f"HTTP error occurred: {e}")
