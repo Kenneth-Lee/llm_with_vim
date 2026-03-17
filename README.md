@@ -115,4 +115,24 @@ Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任�
 
 ## 当前支持的引擎
 
-todo
+* [Ollama](https://ollama.com/)，参考配置：Configure: {'engine_type': 'ollama',
+  'model': 'qwen2.5:0.5b', 'keep_alive': 3600}
+
+* [DeepSeek](https://www.deepseek.com/) ，参考配置：Configure: {'engine_type':
+  'deepseek', 'model': 'deepseek-chat', 'auth': 'Bearer sk-xxx'}
+
+* [智谱 AI](https://open.bigmodel.cn/)，参考配置：Configure: {'engine_type':
+  'zhipu', 'model': 'glm-4.7', 'auth': 'Bearer your-api-key'}
+
+* [阿里云百炼](https://dashscope.aliyuncs.com/) ，参考配置：Configure:
+  {'engine_type': 'ali', 'model': 'deepseek-r1', 'auth': 'Bearer sk-xxx'}
+
+* [海鲸 AI](https://www.atalk-ai.com/) ，参考配置：Configure: {'engine_type':
+  'haijing', 'model': 'DeepSeek-R1', 'auth': 'Basic xxx'}
+
+* [llama.cpp](https://github.com/ggerganov/llama.cpp) ，参考配置：Configure:
+  {'engine_type': 'llama', 'server_addr': 'localhost:8080'}
+
+* 对于任何兼容 OpenAI API 格式的服务（如 [vLLM](https://github.com/vllm-project/vllm)），
+  可以使用任意引擎名称，参考配置：Configure: {'engine_type': 'vllm',
+  'server_addr': 'localhost:8000', 'model': 'Qwen/Qwen2.5-7B-Instruct'}
