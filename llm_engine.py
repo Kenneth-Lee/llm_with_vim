@@ -267,6 +267,7 @@ def _parse_input():
 
     # 输出所有收集的行
     sys.stdout.write(''.join(output_lines))
+    sys.stdout.flush()
 
     if user_config:
         try:
