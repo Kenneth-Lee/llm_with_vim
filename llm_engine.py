@@ -20,6 +20,7 @@ else:
 
 # 全局配置
 _config = None
+_verbose_mode = False
 
 # Ollama地址别名
 _ollama_addr_alias = {
@@ -67,6 +68,11 @@ def _make_ollama_api(host, api='chat'):
 def debug(msg):
     """输出调试信息到stdout（作为注释）"""
     print(f"// {msg}")
+
+def verbose_debug(msg):
+    """输出详细调试信息（需要verbose=True才输出）"""
+    if _verbose_mode:
+        print(f"// {msg}")
 
 def _add_msg(req, role, content):
     """给请求增加某个角色的消息"""
@@ -325,13 +331,16 @@ def _get_user_config_item(name, default, user_config):
 
 def answer():
     """主函数：处理输入并发送给LLM"""
-    global _config
+    global _config, _verbose_mode
     _load_config()
 
     start_time = time.time()
 
     # 处理输入
     history, user_config = _parse_input()
+
+    # 获取verbose配置（尽早获取，以便后续调试信息能正确输出）
+    _verbose_mode = _get_user_config_item("verbose", False, user_config)
 
     # API请求头部
     headers = {'Content-Type': 'application/json'}
@@ -449,7 +458,11 @@ def answer():
     if engine_type != 'llama':
         history["stream"] = True
 
-    # debug(f"api={api}, history={history}, headers={headers}")
+    # 详细调试信息（需要verbose=True才输出）
+    verbose_debug(f"engine_type={engine_type}")
+    verbose_debug(f"api={api}")
+    verbose_debug(f"headers={headers}")
+    verbose_debug(f"history={history}")
     debug("===========>")
 
     # 发起请求

@@ -113,6 +113,11 @@ Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任�
   * connect_timeout=30。定义连接超时时间
   * read_timeout=1800。定义请求超时时间
 
+* 如果你不知道引擎是什么协议，可以尝试用通用的OpenAI协议去尝试一下，只要引擎的
+  名字和标准模型不一样，就会尝试用OpenAI的协议去访问。如果你不确定你的请求是否
+  和请求的一致，可以在Configure中加一个"'verbose': True"的参数，这样输出中会包
+  含每次llm请求的信息，让你看看是否符合期望。
+
 ## 当前支持的引擎
 
 * [Ollama](https://ollama.com/)，参考配置：Configure: {'engine_type': 'ollama',

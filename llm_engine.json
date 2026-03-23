@@ -50,12 +50,14 @@
                 "temperature": 1,
                 "repeat_penalty": 1.2,
                 "connect_timeout": 30,
-                "read_timeout": 1800
+                "read_timeout": 1800,
+                "verbose": false
         },
 
 	"default-config-comment": {
 		"comment": "通用参数及其默认值",
                 "connect_timeout": "连接超时时间（秒）",
-                "read_timeout": "读取超时时间（秒），ollama首次加载模型可能需要较长时间"
+                "read_timeout": "读取超时时间（秒），ollama首次加载模型可能需要较长时间",
+                "verbose": "是否输出详细调试信息（true/false），用于定位请求问题"
          }
 }
