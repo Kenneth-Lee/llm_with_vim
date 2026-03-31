@@ -120,14 +120,16 @@ function! DoGen()
 	endfunction
 
 	" 构建命令
+	let l:file_dir = expand('%:p:h')
 	let l:cmd = s:env_status.python . ' ' . s:env_status.engine
 
-	" 异步请求LLM
+	" 异步请求LLM，添加环境变量
 	let l:job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
 		\ 'out_cb': function('HandleOutput'),
 		\ 'err_cb': function('HandleErr'),
+		\ 'env': {'LLM_FILE_DIR': l:file_dir},
 	\ })
 
 	let old_lst = &laststatus
@@ -183,6 +185,51 @@ function! DiaglogOutlineGotoLine(lnum)
 	execute "q!"
 	execute "bd" s:outline_bname
 	execute l:lnum
+endfunction
+
+" 预览图片（光标需在 $$path$$ 位置）
+function! PreviewImage()
+	" 获取当前行
+	let line = getline('.')
+	" 匹配 $$...$$ 模式
+	let match = matchstr(line, '\$\$[^$]*\$\$')
+	if empty(match)
+		echohl WarningMsg
+		echo '当前行没有图片引用，格式: $$path/to/image.png$$'
+		echohl None
+		return
+	endif
+	
+	" 提取图片路径
+	let img_path = substitute(match, '\$\$\(.*\)\$\$', '\1', '')
+	
+	" 处理路径：如果是相对路径，基于当前文件目录
+	if img_path[0] !=# '/' && img_path[1:2] !=# ':\\'
+		let base_dir = expand('%:p:h')
+		let img_path = base_dir . '/' . img_path
+	endif
+	
+	" 检查文件是否存在
+	if !filereadable(img_path)
+		echohl ErrorMsg
+		echo '图片不存在: ' . img_path
+		echohl None
+		return
+	endif
+	
+	" 尝试用系统命令打开图片
+	if has('mac')
+		call system('open ' . shellescape(img_path))
+	elseif has('unix')
+		call system('xdg-open ' . shellescape(img_path) . ' &')
+	elseif has('win32')
+		call system('start "" ' . shellescape(img_path))
+	else
+		let &statusline = '图片路径: ' . img_path
+		return
+	endif
+	
+	let &statusline = '正在打开图片: ' . img_path
 endfunction
 
 " 实现Outline
@@ -244,6 +291,8 @@ function! s:SetupLLMBuffer()
 	syn match comment "^#.*$"
 	syn match comment "^//.*$"
 	syn match Title "^Configure: .*$"
+	" 图片引用语法 $$path$$
+	syn match Special "\$\$[^$]*\$\$"
 	syn keyword Type Assistant System inc
 	syn keyword Keyword User
 
@@ -253,6 +302,8 @@ function! s:SetupLLMBuffer()
 	noremap <buffer> K <Nop>
 	nmap <buffer> <F1> :call DoGen()<CR>
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
+	" F3: 预览图片（光标在$$...$$位置）
+	nmap <buffer> <F3> :call PreviewImage()<CR>
 	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
 
 	ab <buffer> WAns Write a new scene:
@@ -261,6 +312,8 @@ function! s:SetupLLMBuffer()
 	ab <buffer> configAli Configure: {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configHj Configure:  {'engine_type': 'haijing', 'auth': 'Basic xxxxxxxxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configZp Configure:  {'engine_type': 'zhipu', 'auth': 'Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx', 'max_tokens': 10240, 'temperature': 1}
+	" 图片引用示例缩写
+	ab <buffer> imgpath $$path/to/image.png$$
 	setlocal spell
 	setlocal complete+=kspell
 endfunction

@@ -11,6 +11,8 @@ import time
 import os
 import requests
 import signal
+import re
+import base64
 
 # Python 2/3 兼容
 if sys.version_info[0] == 2:
@@ -74,10 +76,75 @@ def verbose_debug(msg):
     if _verbose_mode:
         print(f"// {msg}")
 
-def _add_msg(req, role, content):
-    """给请求增加某个角色的消息"""
-    if content and content.strip():
-        req['messages'].append({"role": role, "content": content.strip()})
+def _encode_image(image_path, base_dir=''):
+    """读取图片并转为 base64"""
+    # 处理路径
+    if os.path.isabs(image_path):
+        full_path = image_path
+    else:
+        full_path = os.path.join(base_dir, image_path) if base_dir else image_path
+        full_path = os.path.normpath(full_path)
+    
+    try:
+        with open(full_path, 'rb') as f:
+            image_data = f.read()
+        # 检测图片类型
+        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+            media_type = 'image/png'
+        elif image_data[:3] == b'\xff\xd8\xff':
+            media_type = 'image/jpeg'
+        elif image_data[:4] == b'GIF8':
+            media_type = 'image/gif'
+        elif image_data[:4] == b'RIFF' and image_data[8:12] == b'WEBP':
+            media_type = 'image/webp'
+        else:
+            media_type = 'image/png'  # 默认
+        
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        return base64_data, media_type, full_path
+    except Exception as e:
+        debug(f"Error reading image {image_path}: {e}")
+        return None, None, full_path
+
+def _extract_images(content, base_dir=''):
+    """从内容中提取 $$图片路径$$ 并替换为占位符，返回处理后的内容和图片列表"""
+    # 匹配 $$...$$ 格式
+    pattern = r'\$\$(.*?)\$\$'
+    images = []
+    
+    def replace_image(match):
+        image_path = match.group(1).strip()
+        base64_data, media_type, full_path = _encode_image(image_path, base_dir)
+        if base64_data:
+            images.append({
+                'path': image_path,
+                'full_path': full_path,
+                'base64': base64_data,
+                'media_type': media_type
+            })
+            return f'[IMAGE:{image_path}]'  # 占位符
+        else:
+            return f'[IMAGE_NOT_FOUND:{image_path}]'
+    
+    processed_content = re.sub(pattern, replace_image, content)
+    return processed_content, images
+
+def _add_msg(req, role, content, images=None):
+    """给请求增加某个角色的消息，支持多模态"""
+    if not content and not images:
+        return
+    
+    msg = {"role": role}
+    
+    if images:
+        # 多模态消息格式（Ollama 风格）
+        msg["content"] = content.strip() if content else ""
+        msg["images"] = [img['base64'] for img in images]
+    else:
+        msg["content"] = content.strip()
+    
+    req['messages'].append(msg)
+
 
 def _parse_input():
     """
@@ -87,17 +154,24 @@ def _parse_input():
     - 所有文件（主文件和头文件）都一行一行顺序处理
     - 维护当前角色状态，延续内容追加到当前角色
     - 遇到@inc时压栈，处理完头文件后弹栈继续，保持角色状态连续
+    - 支持 $$图片路径$$ 语法嵌入多模态内容
     """
     global _config
     history = _config["request_template"]
     history["messages"] = []
     user_config = None
+    
+    # 存储当前角色的图片
+    current_images = []
 
     # 读取主输入文件
     main_lines = sys.stdin.readlines()
+    
+    # 获取基础目录：环境变量优先，默认为当前工作目录
+    file_dir = os.environ.get('LLM_FILE_DIR', os.getcwd())
 
     # 堆栈：每个元素是 (lines, line_idx, base_dir, depth, is_main_file)
-    stack = [(main_lines, 0, '', 0, True)]
+    stack = [(main_lines, 0, file_dir, 0, True)]
     MAX_DEPTH = 10
 
     # 状态机状态
@@ -113,9 +187,9 @@ def _parse_input():
 
     def flush_role():
         """提交当前角色的内容"""
-        nonlocal user_config, current_role, current_content, role_outputted, main_file_has_config
+        nonlocal user_config, current_role, current_content, role_outputted, main_file_has_config, current_images
 
-        if not current_content.strip():
+        if not current_content.strip() and not current_images:
             return
 
         content = current_content
@@ -124,21 +198,22 @@ def _parse_input():
             # Config 更新 user_config（后覆盖前）
             user_config = content.strip()
         elif current_role != 'none':
-            # 其他角色添加到 history
-            _add_msg(history, current_role, content)
+            # 其他角色添加到 history，支持多模态
+            _add_msg(history, current_role, content, current_images)
 
-        # 重置当前内容
+        # 重置当前内容和图片
         current_content = ''
+        current_images = []
         role_outputted = False
 
-    def output_line(is_main_file, line_to_output):
-        """输出一行内容到output_lines（仅主文件）"""
+    def output_line(is_main_file, line_to_output, images=None):
+        """输出一行内容到output_lines（仅主文件），支持图片信息"""
         nonlocal main_file_has_config, current_role, role_outputted
 
         if not is_main_file:
             return
 
-        if not line_to_output.strip():
+        if not line_to_output.strip() and not images:
             output_lines.append(line_to_output)
             return
 
@@ -158,6 +233,11 @@ def _parse_input():
             else:
                 # 延续内容，不加前缀
                 output_lines.append(line_to_output)
+            
+            # 如果有图片，添加图片引用注释
+            if images:
+                for img in images:
+                    output_lines.append(f"// Image: {img['full_path']}\n")
 
     while stack:
         current_lines, line_idx, base_dir, depth, is_main_file = stack[-1]
@@ -246,7 +326,17 @@ def _parse_input():
                 current_role = found_role
                 # 提取内容（去掉角色前缀）
                 prefix = _roles[found_role]
-                current_content = line[len(prefix):] if line.startswith(prefix) else line
+                content_line = line[len(prefix):] if line.startswith(prefix) else line
+                
+                # 提取图片（仅在 User 角色中处理）
+                if found_role == 'user':
+                    processed_content, extracted_images = _extract_images(content_line, base_dir)
+                    current_content = processed_content
+                    current_images = extracted_images
+                else:
+                    current_content = content_line
+                    current_images = []
+                
                 # 头文件中的新角色定义需要标记已输出（虽然不真实输出到output_lines）
                 if not is_main_file:
                     role_outputted = True
@@ -254,24 +344,40 @@ def _parse_input():
                     if found_role == 'config':
                         main_file_has_config = True
                 else:
-                    # 主文件的新角色定义直接输出原始行（已包含前缀）
-                    output_lines.append(line)
-                    role_outputted = True
+                    # 主文件的新角色定义直接输出原始行（已包含前缀），但图片要特殊处理
+                    if found_role == 'user' and current_images:
+                        # 输出原始行和图片注释
+                        output_lines.append(line)
+                        for img in current_images:
+                            output_lines.append(f"// Image: {img['full_path']}\n")
+                        role_outputted = True
+                    else:
+                        output_lines.append(line)
+                        role_outputted = True
                     # 如果是config角色，标记主文件已有config
                     if found_role == 'config':
                         main_file_has_config = True
             else:
                 # 延续当前角色
-                current_content += line
-                # 延续行只有主文件输出
-                if is_main_file:
-                    output_line(is_main_file, line)
+                if current_role == 'user':
+                    # 在 User 角色中继续提取图片
+                    processed_line, extracted_images = _extract_images(line, base_dir)
+                    current_content += processed_line
+                    current_images.extend(extracted_images)
+                    # 延续行只有主文件输出
+                    if is_main_file:
+                        output_line(is_main_file, line, extracted_images)
+                else:
+                    current_content += line
+                    # 延续行只有主文件输出
+                    if is_main_file:
+                        output_line(is_main_file, line)
 
     # 所有文件处理完毕，如果主文件没有Config但有user_config，插入到开头
     if not main_file_has_config and user_config:
         output_lines.insert(0, _roles['config'] + user_config + '\n')
 
-    # 输出所有收集的行
+    # 输出所有收集的行（保留原始输入，但在图片后添加注释）
     sys.stdout.write(''.join(output_lines))
     sys.stdout.flush()
 
@@ -457,6 +563,98 @@ def answer():
         history["keep_alive"] = keep_alive
     if engine_type != 'llama':
         history["stream"] = True
+
+    # 处理多模态消息格式转换
+    def convert_multimodal_messages(messages, engine_type):
+        """根据引擎类型转换消息格式"""
+        converted = []
+        for msg in messages:
+            if msg.get('role') == 'user' and 'images' in msg and msg['images']:
+                # 有图片的消息
+                if engine_type == 'ollama':
+                    # Ollama 格式: content + images 数组
+                    converted.append({
+                        'role': msg['role'],
+                        'content': msg.get('content', ''),
+                        'images': msg['images']
+                    })
+                elif engine_type == 'llama':
+                    # llama.cpp 格式: 使用 content 数组
+                    content_array = []
+                    if msg.get('content', '').strip():
+                        content_array.append({
+                            'type': 'text',
+                            'text': msg['content']
+                        })
+                    for img_base64 in msg['images']:
+                        content_array.append({
+                            'type': 'image_url',
+                            'image_url': {
+                                'url': f'data:image/jpeg;base64,{img_base64}'
+                            }
+                        })
+                    converted.append({
+                        'role': msg['role'],
+                        'content': content_array if len(content_array) > 1 else content_array[0]['text'] if content_array else ''
+                    })
+                elif engine_type in ['openai_compat', 'deepseek', 'zhipu', 'ali']:
+                    # OpenAI 兼容格式
+                    content_array = []
+                    if msg.get('content', '').strip():
+                        content_array.append({
+                            'type': 'text',
+                            'text': msg['content']
+                        })
+                    for img_base64 in msg['images']:
+                        # 检测图片类型
+                        media_type = 'image/jpeg'  # 默认
+                        try:
+                            import base64
+                            img_data = base64.b64decode(img_base64)
+                            if img_data[:8] == b'\x89PNG\r\n\x1a\n':
+                                media_type = 'image/png'
+                            elif img_data[:3] == b'\xff\xd8\xff':
+                                media_type = 'image/jpeg'
+                        except:
+                            pass
+                        content_array.append({
+                            'type': 'image_url',
+                            'image_url': {
+                                'url': f'data:{media_type};base64,{img_base64}'
+                            }
+                        })
+                    converted.append({
+                        'role': msg['role'],
+                        'content': content_array
+                    })
+                else:
+                    # 其他引擎，保留原样（可能不支持）
+                    converted.append(msg)
+            else:
+                # 普通消息（无图片）
+                if 'images' in msg:
+                    # 移除 images 字段
+                    msg_copy = {k: v for k, v in msg.items() if k != 'images'}
+                    converted.append(msg_copy)
+                else:
+                    converted.append(msg)
+        return converted
+
+    # 转换消息格式
+    original_messages = history.get('messages', [])
+    history['messages'] = convert_multimodal_messages(original_messages, engine_type)
+
+    # 检查是否包含图片但模型可能不支持
+    has_images = any('images' in m for m in original_messages)
+    if has_images and engine_type not in ['ollama', 'llama', 'openai_compat']:
+        debug(f"警告: 当前引擎 {engine_type} 可能不支持图像输入，请使用支持多模态的模型")
+
+    # 输出第一个用户消息的内容，用于调试图片是否解析成功
+    for msg in history.get('messages', []):
+        if msg.get('role') == 'user':
+            if isinstance(msg.get('content'), list):
+                debug(f"多模态消息包含 {len(msg['content'])} 部分")
+            break
 
     # 详细调试信息（需要verbose=True才输出）
     verbose_debug(f"engine_type={engine_type}")
