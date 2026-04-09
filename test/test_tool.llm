@@ -1,0 +1,2 @@
+Configure: {'engine_type': 'ollama', 'model': 'glm-5.1:cloud', 'tools': ['read', 'bash']}
+User: 当前设备的ip地址是多少？

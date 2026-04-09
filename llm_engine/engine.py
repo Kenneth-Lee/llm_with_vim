@@ -466,6 +466,117 @@ def _get_user_config_item(name, default, user_config):
         return c
     return c
 
+def _stream_response(resp, engine_type):
+    """
+    流式解析响应，实时输出文本内容，同时收集工具调用信息。
+    返回 (content_text, tool_calls_list)。
+    tool_calls 格式: [{'id': str, 'type': 'function',
+                       'function': {'name': str, 'arguments': str}}]
+    """
+    content_parts = []
+    # 累积工具调用: index -> {'id', 'type', 'function': {'name', 'arguments'}}
+    tool_calls_acc = {}
+
+    if engine_type == 'ollama':
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            try:
+                data = json.loads(line.decode('utf-8'))
+                message = data.get('message', {})
+                c = message.get('content', '')
+                if c:
+                    print(c, end='', flush=True)
+                    content_parts.append(c)
+                # Ollama 的 tool_calls 出现在最终消息中
+                for i, tc in enumerate(message.get('tool_calls', [])):
+                    args = tc.get('function', {}).get('arguments', {})
+                    if isinstance(args, dict):
+                        args = json.dumps(args, ensure_ascii=False)
+                    tool_calls_acc[i] = {
+                        'id': tc.get('id', f'call_{i}'),
+                        'type': 'function',
+                        'function': {
+                            'name': tc['function']['name'],
+                            'arguments': args
+                        }
+                    }
+            except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
+                continue
+
+    elif engine_type == 'haijing':
+        for line in resp.iter_lines():
+            if line:
+                try:
+                    decoded = line.decode('utf-8')
+                    print(decoded)
+                    content_parts.append(decoded + '\n')
+                except UnicodeDecodeError:
+                    continue
+
+    elif engine_type == 'llama':
+        for line in resp.iter_lines():
+            if line:
+                try:
+                    data = json.loads(line.decode('utf-8'))
+                    if 'choices' in data and data['choices']:
+                        c = data['choices'][0].get('message', {}).get('content', '')
+                        if c:
+                            print(c, end='', flush=True)
+                            content_parts.append(c)
+                except (json.JSONDecodeError, UnicodeDecodeError):
+                    continue
+
+    else:
+        # OpenAI 兼容 SSE 格式 (deepseek, zhipu, ali, openai_compat)
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            try:
+                decoded = line.decode('utf-8')
+                if not decoded.startswith('data:'):
+                    continue
+                payload = decoded.split("data:", 1)[-1].strip()
+                if payload == '[DONE]':
+                    break
+
+                data = json.loads(payload)
+                if 'choices' not in data or not data['choices']:
+                    continue
+
+                delta = data['choices'][0].get('delta', {})
+
+                # 文本内容
+                c = delta.get('content', '')
+                if c:
+                    print(c, end='', flush=True)
+                    content_parts.append(c)
+
+                # 工具调用（流式累积：name 和 arguments 分多个 chunk 到达）
+                for tc_delta in delta.get('tool_calls', []):
+                    idx = tc_delta.get('index', 0)
+                    if idx not in tool_calls_acc:
+                        tool_calls_acc[idx] = {
+                            'id': '',
+                            'type': 'function',
+                            'function': {'name': '', 'arguments': ''}
+                        }
+                    if tc_delta.get('id'):
+                        tool_calls_acc[idx]['id'] = tc_delta['id']
+                    func_delta = tc_delta.get('function', {})
+                    if func_delta.get('name'):
+                        tool_calls_acc[idx]['function']['name'] += func_delta['name']
+                    if 'arguments' in func_delta:
+                        tool_calls_acc[idx]['function']['arguments'] += func_delta['arguments']
+
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                continue
+
+    full_content = ''.join(content_parts)
+    tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
+    return full_content, tool_calls
+
+
 def answer():
     """主函数：处理输入并发送给LLM"""
     global _config, _verbose_mode
@@ -692,107 +803,93 @@ def answer():
     verbose_debug(f"api={api}")
     verbose_debug(f"headers={headers}")
     verbose_debug(f"history={history}")
+
+    # 工具调用配置
+    tool_names = _get_user_config_item("tools", [], user_config)
+    tool_defs = None
+    if tool_names and isinstance(tool_names, list):
+        from llm_engine.tools import get_tool_definitions, execute_tool
+        tool_defs = get_tool_definitions(tool_names)
+        if tool_defs:
+            history["tools"] = tool_defs
+            verbose_debug(f"tools={[t['function']['name'] for t in tool_defs]}")
+
     debug("===========>")
 
-    # 发起请求
+    # 发起请求（支持工具调用循环）
+    base_dir = os.environ.get('LLM_FILE_DIR', os.getcwd())
+    max_tool_rounds = _get_user_config_item("max_tool_rounds", 10, user_config)
     resp = None
     response_completed = False
     try:
-        resp = requests.post(api, json=history, headers=headers, stream=True, timeout=timeout)
-        resp.raise_for_status()
-
         print(_roles['assistant'], end='', flush=True)
-        if engine_type == 'haijing':
-            for i in resp.iter_lines():
-                if i:
+
+        for tool_round in range(max_tool_rounds + 1):
+            resp = requests.post(api, json=history, headers=headers,
+                                 stream=True, timeout=timeout)
+            resp.raise_for_status()
+
+            content, tool_calls = _stream_response(resp, engine_type)
+
+            if not tool_calls or not tool_defs:
+                break
+
+            # 有工具调用：执行工具并继续对话
+            print()  # 换行
+
+            # 将 assistant 的 tool_calls 消息加入历史
+            assistant_msg = {"role": "assistant", "content": content or ""}
+            if engine_type == 'ollama':
+                # Ollama：arguments 保持 dict 格式
+                ollama_tcs = []
+                for tc in tool_calls:
+                    args = tc['function']['arguments']
+                    if isinstance(args, str):
+                        try:
+                            args = json.loads(args)
+                        except json.JSONDecodeError:
+                            args = {}
+                    ollama_tcs.append({
+                        'function': {'name': tc['function']['name'],
+                                     'arguments': args}
+                    })
+                assistant_msg["tool_calls"] = ollama_tcs
+            else:
+                # OpenAI 兼容格式
+                assistant_msg["tool_calls"] = tool_calls
+            history["messages"].append(assistant_msg)
+
+            # 逐个执行工具
+            for tc in tool_calls:
+                func_name = tc['function']['name']
+                func_args = tc['function']['arguments']
+                if isinstance(func_args, str):
                     try:
-                        decoded_line = i.decode('utf-8')
-                        print(decoded_line)
-                    except UnicodeDecodeError:
-                        continue
-        elif engine_type == 'zhipu':
-            for i in resp.iter_lines():
-                if i:
-                    try:
-                        decoded_line = i.decode('utf-8')
-                        if decoded_line.startswith('data:'):
-                            resp_s = decoded_line.split("data:", 1)[-1].strip()
-                            if resp_s == '[DONE]':
-                                break
-                            else:
-                                try:
-                                    resp_i = json.loads(resp_s)
-                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
-                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
-                                        if delta_content:
-                                            print(delta_content, end='', flush=True)
-                                except json.JSONDecodeError:
-                                    pass
-                    except UnicodeDecodeError:
-                        continue
-        elif engine_type == 'ali':
-            for i in resp.iter_lines():
-                if i:
-                    try:
-                        decoded_line = i.decode('utf-8')
-                        if decoded_line.startswith('data:'):
-                            resp_s = decoded_line.split("data:", 1)[-1].strip()
-                            if resp_s == '[DONE]':
-                                break
-                            else:
-                                try:
-                                    resp_i = json.loads(resp_s)
-                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
-                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
-                                        if delta_content:
-                                            print(delta_content, end='', flush=True)
-                                except json.JSONDecodeError:
-                                    pass
-                    except UnicodeDecodeError:
-                        continue
-        elif engine_type == 'ollama':
-            for i in resp.iter_lines():
-                if i:
-                    try:
-                        resp_i = json.loads(i.decode('utf-8'))
-                        if 'message' in resp_i:
-                            content = resp_i['message'].get('content', '')
-                            if content:
-                                print(content, end='', flush=True)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
-        elif engine_type == 'llama':
-            for i in resp.iter_lines():
-                if i:
-                    try:
-                        resp_i = json.loads(i.decode('utf-8'))
-                        if 'choices' in resp_i and len(resp_i['choices']) > 0:
-                            content = resp_i['choices'][0]['message'].get('content', '')
-                            if content:
-                                print(content, end='', flush=True)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        continue
-        else:
-            # OpenAI 兼容引擎（vLLM 等）的流式响应处理
-            for i in resp.iter_lines():
-                if i:
-                    try:
-                        decoded_line = i.decode('utf-8')
-                        if decoded_line.startswith('data:'):
-                            resp_s = decoded_line.split("data:", 1)[-1].strip()
-                            if resp_s == '[DONE]':
-                                break
-                            else:
-                                try:
-                                    resp_i = json.loads(resp_s)
-                                    if 'choices' in resp_i and len(resp_i['choices']) > 0:
-                                        delta_content = resp_i['choices'][0].get('delta', {}).get('content', '')
-                                        if delta_content:
-                                            print(delta_content, end='', flush=True)
-                                except json.JSONDecodeError:
-                                    pass
-                    except UnicodeDecodeError:
-                        continue
+                        func_args = json.loads(func_args)
+                    except json.JSONDecodeError:
+                        func_args = {}
+
+                debug(f"[Tool: {func_name}] {json.dumps(func_args, ensure_ascii=False)}")
+
+                result = execute_tool(func_name, func_args, base_dir)
+
+                # 输出截断的结果预览
+                preview = result[:200].replace('\n', '\\n')
+                if len(result) > 200:
+                    preview += '...'
+                debug(f"[Result: {func_name}] {preview}")
+
+                # 将工具结果加入历史
+                tool_msg = {"role": "tool", "content": result}
+                if tc.get('id'):
+                    tool_msg["tool_call_id"] = tc['id']
+                if engine_type == 'ollama':
+                    # Ollama 不需要 tool_call_id
+                    tool_msg.pop("tool_call_id", None)
+                history["messages"].append(tool_msg)
+
+            verbose_debug(f"tool round {tool_round + 1} completed, continuing...")
+
         response_completed = True
         print()
     except requests.exceptions.Timeout:
