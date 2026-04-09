@@ -24,4 +24,4 @@ version = {file = "VERSION"}
 include = ["llm_engine*"]
 
 [tool.setuptools.package-data]
-llm_engine = ["default_config.json"]
+llm_engine = ["default_config.json", "tool_definitions.json"]

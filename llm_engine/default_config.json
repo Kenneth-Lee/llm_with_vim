@@ -59,7 +59,7 @@
                 "connect_timeout": "连接超时时间（秒）",
                 "read_timeout": "读取超时时间（秒），ollama首次加载模型可能需要较长时间",
                 "verbose": "是否输出详细调试信息（true/false），用于定位请求问题",
-                "tools": "启用的工具列表，如 [\"read\", \"bash\"]，需要模型支持 function calling",
+                "tools": "启用的工具列表，可选: read, write, edit, bash, search, list_dir, python, web_fetch",
                 "max_tool_rounds": "工具调用最大轮数，默认10"
          }
 }

@@ -1,2 +1,173 @@
-Configure: {'engine_type': 'ollama', 'model': 'glm-5.1:cloud', 'tools': ['read', 'bash']}
-User: 当前设备的ip地址是多少？
+Configure: {'engine_type': 'ollama', 'model': 'glm-5.1:cloud', 'tools': ['read', 'bash', 'search', 'web_fetch']}
+User: 现在最新的关于LLM的tool的研究论文都有哪些？给我推荐几篇好的让我去学习一下。
+// ===========>
+Assistant: 好的！我来帮你搜索一下关于 LLM Tool Use / Tool Calling 方向的最新研究论文。让我从多个渠道搜集信息。
+// [Tool: web_fetch] {"url": "https://huggingface.co/papers?q=tool+use+LLM"}
+// [Result: web_fetch] Error fetching URL: HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /papers?q=tool+use+LLM (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection objec...
+
+// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=LLM+tool+use&searchtype=all&order=-announced_date_first"}
+// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+
+// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool-augmented+large+language+model+survey&searchtype=all&order=-announced_date_first"}
+// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+
+// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool+calling+LLM+benchmark+training&searchtype=all&order=-announced_date_first"}
+// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+根据我从多个搜索渠道汇总的结果，下面为你精心整理了一份**关于 LLM Tool Use（工具使用/工具调用）方向的最新高质量论文推荐清单**，按主题分类，方便你系统学习。
+
+---
+
+## 🔥 一、综述类——入门必读，建立全局认知
+
+### 1. 📖 **The Evolution of Tool Use in LLM Agents: From Single-Tool Call to Multi-Tool Orchestration**
+- **arXiv**: 2603.22862 (2026年3月)
+- **亮点**: 全面梳理了LLM工具使用从"单次调用"到"多工具编排"的演进，覆盖6大核心维度：推理时规划与执行、训练与轨迹构建、安全与控制、资源约束下的效率、开放环境中的能力完整性、基准设计与评估。
+- **推荐理由**: **最系统、最新**的工具使用综述，强烈推荐首先阅读。
+
+### 2. 📖 **Fast, Slow, and Tool-augmented Thinking for LLMs: A Review**
+- **arXiv**: 2508.12265 (2025年8月)
+- **亮点**: 从认知心理学视角出发，提出快/慢思维 + 内部/外部知识两个维度的分类法，将工具增强推理放在更宏观的认知框架下理解。
+- **推荐理由**: 视角独特，有助于理解"什么时候该用工具"的元认知问题。
+
+### 3. 📖 **Empowering Multimodal LLMs with External Tools: A Comprehensive Survey**
+- **arXiv**: 2508.10955 (2025年8月), 361篇参考文献
+- **亮点**: 专注于多模态大模型的工具增强，覆盖数据获取、下游任务增强、评估、局限与未来方向四大维度。
+- **推荐理由**: 如果关注**多模态+工具**，这是目前最全面的综述。
+
+### 4. 📖 **A Survey of Context Engineering for Large Language Models** (1400+论文)
+- **arXiv**: 2507.13334 (2025年7月)
+- **亮点**: 超大规模综述（1411篇引用），系统化定义了"上下文工程"，将RAG、记忆系统、**工具集成推理**和多智能体系统统一起来分析。
+- **推荐理由**: 帮你理解Tool Use在整个LLM系统架构中的位置。
+
+---
+
+## 🛠️ 二、训练方法——如何教LLM学会用工具
+
+### 5. 🏋️ **Training LLMs for Multi-Step Tool Orchestration with Constrained Data Synthesis and Graduated Rewards**
+- **arXiv**: 2603.24709 (2026年3月)
+- **亮点**: 提出分级奖励分解为"原子有效性"和"编排一致性"，在ComplexFuncBench上大幅提升，且能跨API生态系统迁移到BFCL v4。
+- **推荐理由**: **多步工具编排训练**的最新方法，奖励设计非常精妙。
+
+### 6. 🏋️ **Multi-Turn Reinforcement Learning for Tool-Calling Agents with Iterative Reward Calibration**
+- **arXiv**: 2604.02869 (2026年4月)
+- **亮点**: 首次在Tau-Bench上应用MT-GRPO+GTPO训练工具调用Agent，4B模型超越GPT-4.1，30B MoE模型接近Claude Sonnet 4.5。发现朴素密集奖励反而降低性能14pp，提出迭代奖励校准方法。
+- **推荐理由**: **实战价值极高**，是目前小模型工具调用训练的SOTA结果。
+
+### 7. 🏋️ **In-Context Reinforcement Learning for Tool Use in Large Language Models (ICRL)**
+- **arXiv**: 2603.08068 (2026年3月)
+- **亮点**: 无需SFT的纯RL框架！利用few-shot prompting在rollout阶段教会模型调用工具，逐步减少示例至zero-shot。在推理和工具使用benchmark上达SOTA。
+- **推荐理由**: **数据高效的创新范式**，跳过SFT直接RL训练，对工程实践很有启发。
+
+### 8. 🏋️ **Tool-R0: Self-Evolving LLM Agents for Tool-Learning from Zero Data**
+- **arXiv**: 2602.21320 (2026年2月)
+- **亮点**: 零数据假设下，Generator和Solver通过自博弈协同进化，相对基础模型提升92.5%，甚至超越全监督基线。
+- **推荐理由**: **自演化训练**的前沿探索，展示了通往自主智能体的一条可行路径。
+
+### 9. 🏋️ **ASTRA: Automated Synthesis of agentic Trajectories and Reinforcement Arenas**
+- **arXiv**: 2601.21558 (2026年1月)
+- **亮点**: 端到端自动化框架，融合轨迹合成+可验证RL环境+统一SFT+在线RL训练，可比拟闭源模型表现。代码开源。
+- **推荐理由**: **完整的训练流水线**，从数据合成到RL训练全覆盖，实用性极强。
+
+---
+
+## 📊 三、基准测试与评估——如何衡量工具使用能力
+
+### 10. 📏 **Benchmarking LLM Tool-Use in the Wild (WildToolBench)** — **ICLR 2026**
+- **arXiv**: 2604.06185 (2026年4月)
+- **亮点**: 基于真实用户行为构建的benchmark，识别三大挑战：组合任务、隐式意图、指令转换。57个LLM评估，**最高准确率不超过15%**！
+- **推荐理由**: 揭示了现有benchmark与真实场景的巨大差距，**ICLR 2026接收**。
+
+### 11. 📏 **Beyond Accuracy: Unveiling Inefficiency Patterns in Tool-Integrated Reasoning (PTE)** — **ACL 2026**
+- **arXiv**: 2604.05404 (2026年4月)
+- **亮点**: 提出PTE（Prefill Token Equivalents）——硬件感知的效率指标，发现4种低效模式，且**PTE成本越高推理正确率越低**。
+- **推荐理由**: 首次系统研究工具推理的**效率问题**，ACL 2026接收。
+
+### 12. 📏 **TRIP-Bench: Long-Horizon Interactive Agents in Real-World Scenarios**
+- **arXiv**: 2602.01675 (2026年2月)
+- **亮点**: 基于真实旅行规划场景，对话可达15轮、150+工具调用、200k+ token上下文。先进模型easy split最多50%成功率，hard split低于10%。
+- **推荐理由**: **长交互、真实场景**的压力测试，同时提出了GTPO在线多轮RL方法。
+
+### 13. 📏 **TPS-Bench: Evaluating AI Agents' Tool Planning & Scheduling Abilities**
+- **arXiv**: 2511.01527 (2025年11月)
+- **亮点**: 聚焦"组合任务"——需要选择工具+安排执行顺序，基于数百个MCP工具构建，200个测试任务。
+- **推荐理由**: 填补了**工具规划与调度**评估的空白。
+
+---
+
+## 🛡️ 四、安全与鲁棒性——工具使用的阴暗面
+
+### 14. 🔒 **SoK: The Attack Surface of Agentic AI -- Tools, and Autonomy**
+- **arXiv**: 2603.22928 (2026年3月)
+- **亮点**: 系统化梳理了Agentic AI的攻击面（prompt注入、知识库投毒、工具/插件利用、多智能体威胁），提出攻击者模型和防御检查清单。
+- **推荐理由**: **安全方向必读**，全面的威胁模型和防御建议。
+
+### 15. 🔒 **TraceSafe: Assessing LLM Guardrails on Multi-Step Tool-Calling Trajectories**
+- **arXiv**: 2604.07223 (2026年4月)
+- **亮点**: 首个评估多步工具调用轨迹中间安全性的benchmark（12风险类别，1000+执行实例），发现护栏效果取决于结构化数据能力而非安全对齐。
+- **推荐理由**: 揭示了**轨迹级安全**与传统单轮安全评估的本质区别。
+
+### 16. 🔒 **Your LLM Agent Can Leak Your Data: Data Exfiltration via Backdoored Tool Use (Back-Reveal)** — **ACL 2026**
+- **arXiv**: 2604.05432 (2026年4月)
+- **亮点**: 后门Agent通过记忆访问工具窃取用户上下文，多轮交互放大泄露。ACL 2026接收。
+- **推荐理由**: 展示了**工具后门攻击**的全新威胁向量。
+
+### 17. 🔒 **Causality Laundering: Denial-Feedback Leakage in Tool-Calling LLM Agents**
+- **arXiv**: 2604.04035 (2026年4月)
+- **亮点**: 发现"拒绝-反馈泄露"攻击模式，提出Agentic Reference Monitor (ARM)运行时防护层。
+- **推荐理由**: 因果推理视角下的安全防护，概念新颖。
+
+---
+
+## 🧠 五、核心能力提升——推理、规划与交互
+
+### 18. 💡 **Tool-DC: Try, Check and Retry — Divide-and-Conquer for Long-Context Tool-Calling**
+- **arXiv**: 2603.11495 (2026年3月)
+- **亮点**: 面对海量噪声工具候选，用"尝试-检查-重试"范式降低推理难度，TF版提升25.10%，TB版使Qwen2.5-7B媲美o3和Claude-Haiku-4.5。
+- **推荐理由**: **简单有效**的工程方法，即插即用。
+
+### 19. 💡 **GraphWalk: Enabling Reasoning through Tool-Based Graph Navigation**
+- **arXiv**: 2604.01610 (2026年4月)
+- **亮点**: 无需训练的工具化图遍历框架，让非推理模型也能做多跳推理，在合成图上大幅超越上下文基线。
+- **推荐理由**: **推理能力通过工具补足**的优秀范例。
+
+### 20. 💡 **Atlas: Orchestrating Heterogeneous Models and Tools for Multi-Domain Complex Reasoning**
+- **arXiv**: 2601.03872 (2026年1月)
+- **亮点**: 双路径框架（训练免费聚类路由+RL多步路由），在15个benchmark上超越GPT-4o，ID提升10.1%，OOD提升13.1%。
+- **推荐理由**: **异构模型-工具协同**的创新思路。
+
+### 21. 💡 **SAGE-Agent: Structured Uncertainty guided Clarification for LLM Agents**
+- **arXiv**: 2511.08798 (2025年11月)
+- **亮点**: 建模工具调用参数的结构化不确定性，用POMDP+EVPI优化提问选择，减少1.5-2.7×澄清问题，GRPO训练将When2Call准确率从36.5%提升至65.2%。
+- **推荐理由**: 解决了**模糊指令下的工具调用**这一实际问题。
+
+---
+
+## 🔑 学习建议路线图
+
+```
+入门阶段（1-2周）:
+├── 论文1: The Evolution of Tool Use (全景综述)
+├── 论文2: Fast, Slow, and Tool-augmented Thinking (认知框架)
+└── 论文4: Context Engineering Survey (系统架构)
+
+方法深入（2-3周）:
+├── 论文5: Multi-Step Tool Orchestration (奖励设计)
+├── 论文6: MT-GRPO+GTPO (多轮RL训练)
+├── 论文7: ICRL (无SFT训练)
+└── 论文9: ASTRA (完整训练流水线)
+
+评估理解（1周）:
+├── 论文10: WildToolBench (真实场景评估)
+├── 论文11: PTE (效率评估)
+└── 论文12: TRIP-Bench (长交互评估)
+
+安全意识（1周）:
+├── 论文14: SoK (攻击面全景)
+├── 论文15: TraceSafe (轨迹安全)
+└── 论文16: Back-Reveal (后门攻击)
+```
+
+这些论文基本代表了2025-2026年LLM Tool Use方向最前沿的研究。如果你对某个子方向特别感兴趣，我可以进一步深挖推荐！
+//updated at Thu Apr  9 20:01:31 2026 in 270.0 seconds
+User:
+
