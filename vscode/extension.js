@@ -1,5 +1,5 @@
 const vscode = require('vscode');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -7,58 +7,49 @@ const fs = require('fs');
 let documentProcesses = new Map();
 
 /**
- * 查找llm_engine.py的路径
- * 搜索顺序: 1. 扩展目录 2. 扩展父目录 3. PATH环境变量
+ * 查找llm_engine的执行方式
+ * 返回 {cmd, args} 对象
+ * 搜索顺序: 1. pip安装的命令 2. 扩展目录脚本 3. 工作区目录
  */
 function findLLMEngine(extensionPath) {
-    // 1. 检查扩展目录
+    // 1. 检查pip安装的命令（推荐方式）
+    try {
+        execFileSync('llm_engine', ['--help'], { stdio: 'ignore', timeout: 3000 });
+        return { cmd: 'llm_engine', args: [] };
+    } catch (e) {
+        // 命令不存在或执行失败，继续查找
+    }
+    try {
+        execFileSync('llm-engine', ['--help'], { stdio: 'ignore', timeout: 3000 });
+        return { cmd: 'llm-engine', args: [] };
+    } catch (e) {
+        // 继续查找
+    }
+
+    // 以下为向后兼容的查找方式
+    const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
+
+    // 2. 检查扩展目录
     let enginePath = path.join(extensionPath, 'llm_engine.py');
     if (fs.existsSync(enginePath)) {
-        return enginePath;
+        return { cmd: pythonPath, args: [enginePath] };
     }
 
-    // 2. 检查扩展父目录
+    // 3. 检查扩展父目录
     enginePath = path.join(extensionPath, '..', 'llm_engine.py');
     if (fs.existsSync(enginePath)) {
-        return enginePath;
+        return { cmd: pythonPath, args: [enginePath] };
     }
 
-    // 3. 检查PATH中是否有llm_engine.py
-    // 尝试在当前工作目录
+    // 4. 检查工作区目录
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
         enginePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'llm_engine.py');
         if (fs.existsSync(enginePath)) {
-            return enginePath;
+            return { cmd: pythonPath, args: [enginePath] };
         }
     }
 
     return null;
-}
-
-/**
- * 检查Python环境
- */
-function checkPythonEnvironment(pythonPath, scriptPath) {
-    return new Promise((resolve, reject) => {
-        const testProcess = spawn(pythonPath, ['-c', 'import requests; import json']);
-
-        let errorOutput = '';
-        testProcess.stderr.on('data', (data) => {
-            errorOutput += data.toString();
-        });
-
-        testProcess.on('close', (code) => {
-            if (code === 0) {
-                resolve(true);
-            } else {
-                reject(new Error('Python环境缺少必需的包。请运行: pip install requests'));
-            }
-        });
-
-        testProcess.on('error', (err) => {
-            reject(new Error(`无法启动Python: ${err.message}`));
-        });
-    });
 }
 
 /**
@@ -120,20 +111,12 @@ function activate(context) {
             // 如果解析失败，使用原路径
         }
 
-        // 查找llm_engine.py
-        const scriptPath = findLLMEngine(realExtensionPath);
-        if (!scriptPath) {
+        // 查找llm_engine
+        const engineInfo = findLLMEngine(realExtensionPath);
+        if (!engineInfo) {
             vscode.window.showErrorMessage(
-                'llm_engine.py 未找到。请将其放在扩展目录、工作区根目录或PATH中。'
+                'llm_engine 未找到。请运行: pip install llm-engine'
             );
-            return;
-        }
-
-        // 检查Python环境
-        try {
-            await checkPythonEnvironment(pythonPath, scriptPath);
-        } catch (err) {
-            vscode.window.showErrorMessage(`环境检查失败: ${err.message}`);
             return;
         }
 
@@ -156,21 +139,22 @@ function activate(context) {
             cancellable: true
         }, (progress, token) => {
             return new Promise((resolve, reject) => {
-                // 启动Python进程
-                const cwd = path.dirname(scriptPath);
-                const process = spawn(pythonPath, [scriptPath], { cwd });
-                documentProcesses.set(documentUri, process);
+                // 启动引擎进程
+                const fileDir = path.dirname(document.uri.fsPath);
+                const spawnEnv = Object.assign({}, process.env, { LLM_FILE_DIR: fileDir });
+                const proc = spawn(engineInfo.cmd, engineInfo.args, { env: spawnEnv });
+                documentProcesses.set(documentUri, proc);
 
                 let outputBuffer = '';
                 let errorBuffer = '';
                 let lastUpdateLength = 0;
 
                 // 发送输入
-                process.stdin.write(inputText);
-                process.stdin.end();
+                proc.stdin.write(inputText);
+                proc.stdin.end();
 
                 // 处理输出 - 实时更新
-                process.stdout.on('data', (data) => {
+                proc.stdout.on('data', (data) => {
                     outputBuffer += data.toString();
 
                     // 实时更新编辑器内容
@@ -196,7 +180,7 @@ function activate(context) {
                 });
 
                 // 处理错误
-                process.stderr.on('data', (data) => {
+                proc.stderr.on('data', (data) => {
                     errorBuffer += data.toString();
                 });
 
@@ -213,7 +197,7 @@ function activate(context) {
                 });
 
                 // 进程完成
-                process.on('close', (code) => {
+                proc.on('close', (code) => {
                     documentProcesses.delete(documentUri);
 
                     if (code === 0) {
@@ -241,7 +225,7 @@ function activate(context) {
                 });
 
                 // 处理进程错误
-                process.on('error', (err) => {
+                proc.on('error', (err) => {
                     documentProcesses.delete(documentUri);
                     vscode.window.showErrorMessage(`Failed to start LLM process: ${err.message}`);
                     reject(err);

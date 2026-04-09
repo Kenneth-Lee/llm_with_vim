@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=45"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-engine"
+dynamic = ["version"]
+description = "LLM chat engine for Vim/VSCode integration"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.6"
+dependencies = [
+    "requests",
+]
+
+[project.scripts]
+llm_engine = "llm_engine:main"
+llm-engine = "llm_engine:main"
+
+[tool.setuptools.dynamic]
+version = {file = "VERSION"}
+
+[tool.setuptools.packages.find]
+include = ["llm_engine*"]
+
+[tool.setuptools.package-data]
+llm_engine = ["default_config.json"]

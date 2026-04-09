@@ -20,8 +20,6 @@
   "main": "./extension.js",
   "files": [
     "extension.js",
-    "llm_engine.py",
-    "llm_engine.json",
     "syntaxes/",
     "LICENSE"
   ],

@@ -8,30 +8,36 @@ let g:llm_engine_loaded = 1
 " 保存插件所在目录（必须在加载时确定）
 let s:plugin_dir = expand('<sfile>:p:h')
 
-" 查找llm_engine.py的路径
-" 搜索顺序: 1. 插件目录 2. PATH环境变量
+" 查找llm_engine的执行方式
+" 搜索顺序: 1. pip安装的命令 2. 插件目录的脚本 3. PATH中的脚本
 function! s:FindLLMEngine()
-	" 1. 检查插件目录
+	" 1. 检查pip安装的命令（推荐方式）
+	if executable('llm_engine')
+		return 'llm_engine'
+	endif
+	if executable('llm-engine')
+		return 'llm-engine'
+	endif
+
+	" 以下为向后兼容的查找方式
+	let l:python_cmd = executable('python3') ? 'python3' : 'python'
+
+	" 2. 检查插件目录
 	let l:engine_path = s:plugin_dir . '/llm_engine.py'
 	if filereadable(l:engine_path)
-		return l:engine_path
+		return l:python_cmd . ' ' . l:engine_path
 	endif
 
 	" 检查插件父目录（兼容plugin/子目录结构）
 	let l:parent_dir = fnamemodify(s:plugin_dir, ':h')
 	let l:engine_path = l:parent_dir . '/llm_engine.py'
 	if filereadable(l:engine_path)
-		return l:engine_path
+		return l:python_cmd . ' ' . l:engine_path
 	endif
 
-	" 2. 检查PATH中是否有llm_engine.py
+	" 3. 检查PATH中是否有llm_engine.py
 	if executable('llm_engine.py')
-		return 'llm_engine.py'
-	endif
-
-	" 3. 检查当前工作目录
-	if filereadable('llm_engine.py')
-		return 'llm_engine.py'
+		return l:python_cmd . ' llm_engine.py'
 	endif
 
 	return ''
@@ -39,26 +45,12 @@ endfunction
 
 " 检查环境是否有效
 function! s:CheckEnvironment()
-	" 检查Python
-	if !executable('python3') && !executable('python')
-		return {'ok': 0, 'msg': 'Python 3 未安装或不在PATH中'}
-	endif
-
-	" 检查llm_engine.py
 	let l:engine = s:FindLLMEngine()
 	if empty(l:engine)
-		return {'ok': 0, 'msg': 'llm_engine.py 未找到。请将其放在插件目录或PATH中'}
+		return {'ok': 0, 'msg': 'llm_engine 未找到。请运行: pip install llm-engine'}
 	endif
 
-	" 测试Python环境（检查requests包）
-	let l:python_cmd = executable('python3') ? 'python3' : 'python'
-	let l:test_cmd = l:python_cmd . ' -c "import requests; import json"'
-	let l:result = system(l:test_cmd)
-	if v:shell_error != 0
-		return {'ok': 0, 'msg': 'Python环境缺少必需的包。请运行: pip install requests'}
-	endif
-
-	return {'ok': 1, 'engine': l:engine, 'python': l:python_cmd}
+	return {'ok': 1, 'engine': l:engine}
 endfunction
 
 " 全局变量存储环境检查结果
@@ -121,7 +113,7 @@ function! DoGen()
 
 	" 构建命令
 	let l:file_dir = expand('%:p:h')
-	let l:cmd = s:env_status.python . ' ' . s:env_status.engine
+	let l:cmd = s:env_status.engine
 
 	" 异步请求LLM，添加环境变量
 	let l:job = job_start(l:cmd, {

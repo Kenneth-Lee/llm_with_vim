@@ -1,0 +1,63 @@
+{
+	"config": {
+    		"engine_type": "ollama",
+    		"server_addr": "default",
+    		"model": "default",
+		"keep_alive": 3600
+	},
+
+	"config-comment": {
+		"comment": "这是config部分的注释",
+		"engine_type": "ollama|deepseek|haijing|zhipu|ali|llama|任意名称(OpenAI兼容)",
+		"server_addr": "服务器的主机名或地址，OpenAI兼容引擎需指定 host:port",
+		"model": "模型名，别名参考ollama_model_alias",
+		"keep_alive": "保持服务数据激活的时间（秒为单位）"
+	},
+
+	"ollama_addr_alias": {
+		"default": "localhost"
+	},
+
+	"ollama_model_alias": {
+		"qwq":       "qwq",
+		"mistral":   "mistraln:story",
+		"mistralsm": "mistral-small:24b",
+		"deepseek":  "deepseek-r1:8b",
+                "default":   "deepseek-r1:32b"
+	},
+
+	"roles": {
+		"system":    "System: ",
+		"user":      "User: ",
+		"assistant": "Assistant: ",
+		"config": "Configure: "
+	},
+	
+	"request_template": {
+        	"max_tokens":   1024,
+		"temperature":  1.2
+	},
+
+        "auth_keys": {
+                "haijing":  "Basic xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "deepseek": "Carrier <sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx>",
+                "zhipu": "Bearer <your-zhipu-api-key>"
+        },
+
+        "default_config": {
+                "model": "default",
+                "max_tokens": 1024,
+                "temperature": 1,
+                "repeat_penalty": 1.2,
+                "connect_timeout": 30,
+                "read_timeout": 1800,
+                "verbose": false
+        },
+
+	"default-config-comment": {
+		"comment": "通用参数及其默认值",
+                "connect_timeout": "连接超时时间（秒）",
+                "read_timeout": "读取超时时间（秒），ollama首次加载模型可能需要较长时间",
+                "verbose": "是否输出详细调试信息（true/false），用于定位请求问题"
+         }
+}

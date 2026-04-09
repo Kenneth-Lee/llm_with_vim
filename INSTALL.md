@@ -1,69 +1,34 @@
 # LLM Chat 插件安装指南
 
-## Vim 插件安装
+## 第一步：安装 LLM Engine（必须）
 
-### 方法 1: 手动安装（推荐）
+通过 pip 安装 LLM 引擎：
+```bash
+# 从项目目录安装
+pip install .
 
-1. **复制插件文件到 Vim 目录**：
-   ```bash
-   # 创建必要的目录
-   mkdir -p ~/.vim/plugin ~/.vim/ftdetect
-
-   # 复制插件文件（llm_engine.py 必须与 llm.vim 在同一目录）
-   cp plugin/llm.vim ~/.vim/plugin/
-   cp llm_engine.py ~/.vim/plugin/
-   cp ftdetect/llm.vim ~/.vim/ftdetect/
-   cp config.json ~/.vim/
-   ```
-
-2. **安装 Python 依赖**：
-   ```bash
-   pip install requests
-   ```
-
-3. **重启 Vim**，打开任意 `.llm` 文件即可自动启用插件
-
-### 方法 2: 使用包管理器
-
-#### Vim-Plug
-在 `~/.vimrc` 中添加：
-```vim
-Plug 'your-username/llm_with_vim'
+# 或者开发模式安装（方便更新）
+pip install -e .
 ```
 
-#### Vundle
-```vim
-Plugin 'your-username/llm_with_vim'
+安装后会在 PATH 中提供 `llm_engine` 命令。
+
+### 配置文件
+
+安装后，引擎会按以下顺序查找 `llm_engine.json` 配置文件：
+1. `LLM_ENGINE_CONFIG` 环境变量指定的路径
+2. `.llm` 文件所在目录
+3. 当前工作目录
+4. `~/.config/llm_engine/llm_engine.json`（用户配置目录）
+5. 包内置默认配置
+
+推荐将自定义配置放在 `~/.config/llm_engine/llm_engine.json`：
+```bash
+mkdir -p ~/.config/llm_engine
+cp llm_engine.json ~/.config/llm_engine/
 ```
 
-然后运行 `:PlugInstall` 或 `:PluginInstall`
-
-### 目录结构说明
-
-插件安装后的目录结构应该是：
-```
-~/.vim/
-├── plugin/
-│   ├── llm.vim          # 主插件文件
-│   └── llm_engine.py    # LLM 引擎脚本（必须与 llm.vim 同目录）
-├── ftdetect/
-│   └── llm.vim          # 文件类型检测
-└── config.json          # 配置文件
-```
-
-### llm_engine.py 的查找路径
-
-插件会按以下顺序查找 `llm_engine.py`：
-1. 插件目录（`~/.vim/plugin/llm_engine.py`）- **推荐**
-2. 插件父目录（`~/.vim/llm_engine.py`）
-3. PATH 环境变量
-4. 当前工作目录
-
-**重要**：`llm_engine.py` 必须与 `llm.vim` 放在同一目录，或者放在上述查找路径中的某个位置。
-
-### 配置 config.json
-
-编辑 `~/.vim/config.json` 设置默认 LLM 引擎：
+然后编辑该文件设置默认 LLM 引擎：
 ```json
 {
   "config": {
@@ -75,47 +40,70 @@ Plugin 'your-username/llm_with_vim'
 }
 ```
 
-## VSCode 扩展安装
+## 第二步：安装编辑器插件
 
-### 方法 1: 开发模式（测试用）
+### Vim 插件安装
 
-1. 在 VSCode 中打开 `vscode/` 目录
-2. 按 `F5` 启动扩展开发主机
-3. 在新窗口中打开 `.llm` 文件使用
-
-### 方法 2: 符号链接安装（推荐）
+#### 手动安装
 
 ```bash
-# 创建符号链接
-ln -s /path/to/llm_with_vim/vscode ~/.vscode/extensions/llm-chat-0.1.0
-
-# 将 llm_engine.py 复制到扩展目录
-cp llm_engine.py ~/.vscode/extensions/llm-chat-0.1.0/
-cp llm_engine.json ~/.vscode/extensions/llm-chat-0.1.0/
-
-# 重启 VSCode
+mkdir -p ~/.vim/plugin ~/.vim/ftdetect
+cp plugin/llm.vim ~/.vim/plugin/
+cp ftdetect/llm.vim ~/.vim/ftdetect/
 ```
 
-### llm_engine.py 的查找路径（VSCode）
+#### 使用包管理器
 
-VSCode 扩展会按以下顺序查找：
-1. 扩展目录（`~/.vscode/extensions/llm-chat-0.1.0/llm_engine.py`）
-2. 扩展父目录
-3. 工作区根目录
+##### Vim-Plug
+在 `~/.vimrc` 中添加：
+```vim
+Plug 'your-username/llm_with_vim'
+```
 
-**推荐做法**：将 `llm_engine.py` 和 `llm_engine.json` 放在扩展目录下。
+##### Vundle
+```vim
+Plugin 'your-username/llm_with_vim'
+```
 
-### 方法 3: 打包安装
+然后运行 `:PlugInstall` 或 `:PluginInstall`
+
+#### 目录结构说明
+
+插件安装后的目录结构：
+```
+~/.vim/
+├── plugin/
+│   └── llm.vim          # 主插件文件
+└── ftdetect/
+    └── llm.vim          # 文件类型检测
+```
+
+插件会按以下顺序查找引擎命令：
+1. `llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
+2. 插件目录中的 `llm_engine.py`（向后兼容）
+3. PATH 中的 `llm_engine.py`
+
+### VSCode 扩展安装
+
+#### 方法 1: 符号链接安装（推荐）
 
 ```bash
-# 安装 vsce（需要良好的网络环境）
-npm install -g @vscode/vsce
+ln -s /path/to/llm_with_vim/vscode ~/.vscode/extensions/llm-chat-0.1.0
+```
 
-# 打包
+重启 VSCode 即可。
+
+VSCode 扩展会按以下顺序查找引擎：
+1. `llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
+2. 扩展目录中的 `llm_engine.py`（向后兼容）
+3. 工作区根目录
+
+#### 方法 2: 打包安装
+
+```bash
+npm install -g @vscode/vsce
 cd vscode
 vsce package
-
-# 安装
 code --install-extension llm-chat-0.1.0.vsix
 ```
 
