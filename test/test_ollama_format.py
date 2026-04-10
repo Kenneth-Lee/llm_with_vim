@@ -5,11 +5,8 @@ import os
 import sys
 import json
 
-# 将目录添加到路径
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-# 导入引擎（不使用 __main__ 部分）
-exec(open('llm_engine.py').read())
+# 导入引擎
+from llm_engine.engine import _load_config, _parse_input
 
 # 捕获转换后的消息
 class MockHistory:
@@ -40,7 +37,7 @@ print(json.dumps(history, indent=2, ensure_ascii=False)[:800])
 # 模拟转换
 if 'messages' in history:
     print("\n=== 转换后的 Ollama 格式 ===")
-    
+
     # 手动执行转换逻辑
     def test_convert(messages, engine_type):
         converted = []
@@ -57,10 +54,10 @@ if 'messages' in history:
             else:
                 converted.append(msg)
         return converted
-    
+
     converted = test_convert(history['messages'], 'ollama')
     print(json.dumps(converted, indent=2, ensure_ascii=False))
-    
+
 print("\n=== 检查要点 ===")
 print("1. User 消息是否有 'images' 字段?", 'images' in history.get('messages', [{}])[1] if len(history.get('messages', [])) > 1 else False)
 print("2. 图片数量:", len(history.get('messages', [{}])[1].get('images', [])) if len(history.get('messages', [])) > 1 else 0)

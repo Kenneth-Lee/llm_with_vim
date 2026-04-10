@@ -27,7 +27,7 @@ echo ""
 echo "=== 测试1: 命令行直接测试 ==="
 echo "请运行以下命令测试："
 echo ""
-echo 'cd work/llm_with_vim && cat << EOF | python3 llm_engine.py'
+echo 'cd work/llm_with_vim && cat << EOF | python3 -m llm_engine'
 echo 'Configure: {"engine_type": "ollama", "model": "llava"}'
 echo 'System: You are a vision assistant.'
 echo 'User: What do you see in this image?'

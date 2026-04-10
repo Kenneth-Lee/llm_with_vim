@@ -154,5 +154,22 @@
                 "required": ["url"]
             }
         }
+    },
+    "view_image": {
+        "type": "function",
+        "function": {
+            "name": "view_image",
+            "description": "View an image file and return its visual content. Supports PNG, JPEG, GIF, WebP formats. The image will be sent to the vision model for analysis.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Image file path (absolute or relative to working directory)"
+                    }
+                },
+                "required": ["path"]
+            }
+        }
     }
 }

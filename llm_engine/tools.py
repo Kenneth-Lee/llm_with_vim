@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import re
+import base64
 import subprocess
 
 
@@ -54,9 +55,10 @@ def execute_tool(func_name, arguments, base_dir=''):
 
 
 def _resolve_path(path, base_dir):
-    """解析路径：相对路径基于 base_dir"""
+    """解析路径：展开 ~ ，相对路径基于 base_dir"""
     if not path:
         return ''
+    path = os.path.expanduser(path)
     if not os.path.isabs(path) and base_dir:
         path = os.path.join(base_dir, path)
     return os.path.normpath(path)
@@ -264,3 +266,44 @@ def _execute_web_fetch(arguments, base_dir):
         return _truncate(text)
     except Exception as e:
         return "Error fetching URL: %s" % e
+
+
+@_register('view_image')
+def _execute_view_image(arguments, base_dir):
+    """查看图片文件，返回包含 base64 数据的特殊结果"""
+    path = arguments.get('path', '')
+    if not path:
+        return "Error: 'path' argument is required"
+    path = _resolve_path(path, base_dir)
+
+    if not os.path.exists(path):
+        return "Error: image file not found: %s" % path
+
+    try:
+        with open(path, 'rb') as f:
+            image_data = f.read()
+
+        # 检测图片类型
+        if image_data[:8] == b'\x89PNG\r\n\x1a\n':
+            media_type = 'image/png'
+        elif image_data[:3] == b'\xff\xd8\xff':
+            media_type = 'image/jpeg'
+        elif image_data[:4] == b'GIF8':
+            media_type = 'image/gif'
+        elif image_data[:4] == b'RIFF' and image_data[8:12] == b'WEBP':
+            media_type = 'image/webp'
+        else:
+            media_type = 'image/png'
+
+        base64_data = base64.b64encode(image_data).decode('utf-8')
+        size_kb = len(image_data) / 1024
+
+        # 返回特殊的 dict 结构，engine.py 会识别并注入图片到对话中
+        return {
+            "_image": True,
+            "text": "Image loaded: %s (%s, %.1fKB)" % (path, media_type, size_kb),
+            "base64": base64_data,
+            "media_type": media_type,
+        }
+    except Exception as e:
+        return "Error reading image: %s" % e

@@ -5,11 +5,8 @@ if exists("g:llm_engine_loaded")
 endif
 let g:llm_engine_loaded = 1
 
-" 保存插件所在目录（必须在加载时确定）
-let s:plugin_dir = expand('<sfile>:p:h')
-
 " 查找llm_engine的执行方式
-" 搜索顺序: 1. pip安装的命令 2. 插件目录的脚本 3. PATH中的脚本
+" 搜索顺序: 1. pip安装的命令 2. python -m llm_engine
 function! s:FindLLMEngine()
 	" 1. 检查pip安装的命令（推荐方式）
 	if executable('llm_engine')
@@ -19,25 +16,11 @@ function! s:FindLLMEngine()
 		return 'llm-engine'
 	endif
 
-	" 以下为向后兼容的查找方式
+	" 2. 尝试 python -m llm_engine
 	let l:python_cmd = executable('python3') ? 'python3' : 'python'
-
-	" 2. 检查插件目录
-	let l:engine_path = s:plugin_dir . '/llm_engine.py'
-	if filereadable(l:engine_path)
-		return l:python_cmd . ' ' . l:engine_path
-	endif
-
-	" 检查插件父目录（兼容plugin/子目录结构）
-	let l:parent_dir = fnamemodify(s:plugin_dir, ':h')
-	let l:engine_path = l:parent_dir . '/llm_engine.py'
-	if filereadable(l:engine_path)
-		return l:python_cmd . ' ' . l:engine_path
-	endif
-
-	" 3. 检查PATH中是否有llm_engine.py
-	if executable('llm_engine.py')
-		return l:python_cmd . ' llm_engine.py'
+	let l:check = system(l:python_cmd . ' -m llm_engine --help 2>/dev/null')
+	if v:shell_error == 0
+		return l:python_cmd . ' -m llm_engine'
 	endif
 
 	return ''
@@ -47,7 +30,7 @@ endfunction
 function! s:CheckEnvironment()
 	let l:engine = s:FindLLMEngine()
 	if empty(l:engine)
-		return {'ok': 0, 'msg': 'llm_engine 未找到。请运行: pip install llm-engine'}
+		return {'ok': 0, 'msg': 'llm_engine 未找到。请运行: pip install -e /path/to/llm_with_vim'}
 	endif
 
 	return {'ok': 1, 'engine': l:engine}
@@ -59,7 +42,7 @@ let s:env_status = {'checked': 0, 'ok': 0}
 " outline的文件名（该文件不需要保存）
 let s:outline_bname = 'diaglog-outline.buffer'
 
-" 把[1,当前行]发入llm_engine.py获取输出
+" 把[1,当前行]发入llm_engine获取输出
 function! DoGen()
 	" 检查环境
 	if !s:env_status.checked || !s:env_status.ok
@@ -300,7 +283,7 @@ function! s:SetupLLMBuffer()
 
 	ab <buffer> WAns Write a new scene:
 	ab <buffer> ITns In the next scene,
-	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': '主机名', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600}
+	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': 'localhost', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600, 'tools' : ['read', 'web_search']}
 	ab <buffer> configAli Configure: {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configHj Configure:  {'engine_type': 'haijing', 'auth': 'Basic xxxxxxxxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configZp Configure:  {'engine_type': 'zhipu', 'auth': 'Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx', 'max_tokens': 10240, 'temperature': 1}

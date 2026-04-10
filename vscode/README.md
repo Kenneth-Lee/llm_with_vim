@@ -53,32 +53,6 @@ code --install-extension llm-with-vscode-1.0.20260129.vsix
 4. 按 `Ctrl+Enter` 键提交查询
 5. 等待LLM响应，内容会自动显示在 `Assistant:` 行后
 
-### 对话格式
-
-按照以下格式编写对话：
-
-```
-Configure:  {'engine_type': 'ollama', 'model': 'qwen2.5:0.5b', 'temperature': 1}
-System: 你是一个AI助手
-// 这是注释
-User: 你的问题
-Assistant: LLM的回答会自动生成在这里
-User: 继续提问
-```
-
-### 常用操作
-
-- **提交查询**: 将光标移动到某个User行，按 `Ctrl+Enter` 提交从文档开头到当前位置的对话
-- **中止生成**: 按 `Shift+K` 可以随时中止正在进行的LLM生成
-- **快速导航**: 按 `F2` 显示所有User查询的大纲，选择后跳转到对应位置
-- **编辑历史**: 可以随时修改之前的User问题或Assistant回答，重新提交会基于修改后的内容生成新回答
-
-## 配置说明
-
-插件会使用打包时包含的`llm_engine.json`和`llm_engine.py`脚本。确保：
-- Python 3.6+已安装
-- llm_engine.json配置正确
-
 ## 与Vim版本的区别
 
 - 快捷键略有不同：
@@ -87,7 +61,4 @@ User: 继续提问
   - Vim的`<F2>` → VSCode的`F2`
 - 使用VSCode的QuickPick显示大纲，而非独立窗口
 - 使用VSCode的进度通知显示生成状态
-
-## 已知限制
-
 - 不支持Vim版本的所有语法功能（如abbreviations）

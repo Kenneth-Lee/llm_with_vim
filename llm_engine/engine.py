@@ -47,49 +47,53 @@ _roles = {
 }
 
 def _load_config():
-    """加载配置文件"""
+    """加载配置文件
+
+    配置优先级（从高到低）：
+      1. 每个 .llm 文件中的 Configure: 行（运行时覆盖）
+      2. 用户配置 ~/.config/llm_engine/llm_engine.json
+      3. 包内置默认配置 default_config.json
+
+    用户配置文件只需包含需要修改的部分（如 auth_keys），会与默认配置深度合并。
+    也可通过 LLM_ENGINE_CONFIG 环境变量指定用户配置文件路径。
+    """
     global _config
     if _config is None:
-        config_file = None
-        search_paths = []
-
-        # 1. 环境变量指定的配置文件
-        env_config = os.environ.get('LLM_ENGINE_CONFIG')
-        if env_config:
-            search_paths.append(env_config)
-
-        # 2. .llm文件所在目录（由插件通过LLM_FILE_DIR环境变量传入）
-        file_dir = os.environ.get('LLM_FILE_DIR')
-        if file_dir:
-            search_paths.append(os.path.join(file_dir, 'llm_engine.json'))
-
-        # 3. 当前工作目录
-        search_paths.append(os.path.join(os.getcwd(), 'llm_engine.json'))
-
-        # 4. 用户配置目录
-        search_paths.append(os.path.join(
-            os.path.expanduser('~'), '.config', 'llm_engine', 'llm_engine.json'))
-
-        # 5. 包内置默认配置
-        search_paths.append(os.path.join(
-            os.path.dirname(__file__), 'default_config.json'))
-
-        for p in search_paths:
-            if os.path.isfile(p):
-                config_file = p
-                break
-
-        if not config_file:
-            print("Error: llm_engine.json not found", file=sys.stderr)
-            sys.exit(1)
-
+        # 先加载内置默认配置作为基础
+        default_path = os.path.join(
+            os.path.dirname(__file__), 'default_config.json')
         try:
-            with open(config_file, 'r', encoding='utf-8') as f:
+            with open(default_path, 'r', encoding='utf-8') as f:
                 _config = json.load(f)
         except (IOError, json.JSONDecodeError) as e:
-            print(f"Error loading config: {e}", file=sys.stderr)
+            print("Error loading default config: %s" % e, file=sys.stderr)
             sys.exit(1)
+
+        # 查找用户配置文件
+        user_config_path = os.environ.get('LLM_ENGINE_CONFIG') or \
+            os.path.join(os.path.expanduser('~'),
+                         '.config', 'llm_engine', 'llm_engine.json')
+
+        if os.path.isfile(user_config_path):
+            try:
+                with open(user_config_path, 'r', encoding='utf-8') as f:
+                    user_cfg = json.load(f)
+                _deep_merge(_config, user_cfg)
+            except (IOError, json.JSONDecodeError):
+                pass
+
     return _config
+
+
+def _deep_merge(base, override):
+    """深度合并 override 到 base，仅覆盖非注释字段"""
+    for key, value in override.items():
+        if key.endswith('-comment') or key == 'config-comment':
+            continue
+        if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+            _deep_merge(base[key], value)
+        else:
+            base[key] = value
 
 def _make_ollama_api(host, api='chat'):
     """构建Ollama API地址"""
@@ -100,12 +104,12 @@ def _make_ollama_api(host, api='chat'):
 
 def debug(msg):
     """输出调试信息到stdout（作为注释）"""
-    print(f"// {msg}")
+    print(f"// {msg}", flush=True)
 
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
     if _verbose_mode:
-        print(f"// {msg}")
+        print(f"// {msg}", flush=True)
 
 def _encode_image(image_path, base_dir=''):
     """读取图片并转为 base64"""
@@ -698,9 +702,12 @@ def answer():
             user_config["keep_alive"] = keep_alive
         debug(f"{_roles['config']} {user_config}")
 
-    # 根据配置完善请求记录
-    for key in common_config.keys():             # 所有common_config中的配置导入请求中
-        history[key] = common_config[key]
+    # 根据配置完善请求记录（只导入 API 认可的请求参数）
+    _internal_keys = {'connect_timeout', 'read_timeout', 'verbose',
+                       'tools', 'max_tool_rounds'}
+    for key in common_config.keys():
+        if key not in _internal_keys:
+            history[key] = common_config[key]
     if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
     if engine_type != 'llama':
@@ -782,12 +789,8 @@ def answer():
                     converted.append(msg)
         return converted
 
-    # 转换消息格式
-    original_messages = history.get('messages', [])
-    history['messages'] = convert_multimodal_messages(original_messages, engine_type)
-
     # 检查是否包含图片但模型可能不支持
-    has_images = any('images' in m for m in original_messages)
+    has_images = any('images' in m for m in history.get('messages', []))
     if has_images and engine_type not in ['ollama', 'llama', 'openai_compat']:
         debug(f"警告: 当前引擎 {engine_type} 可能不支持图像输入，请使用支持多模态的模型")
 
@@ -825,8 +828,30 @@ def answer():
         print(_roles['assistant'], end='', flush=True)
 
         for tool_round in range(max_tool_rounds + 1):
+            # 每轮请求前转换多模态消息格式
+            history['messages'] = convert_multimodal_messages(
+                history['messages'], engine_type)
             resp = requests.post(api, json=history, headers=headers,
                                  stream=True, timeout=timeout)
+            # 如果 400 且含图片，可能是模型不支持视觉，去掉图片重试
+            if resp.status_code == 400:
+                has_images = any(
+                    isinstance(m.get('content'), list) and
+                    any(isinstance(p, dict) and p.get('type') == 'image_url'
+                        for p in m['content'])
+                    for m in history.get('messages', [])
+                )
+                if has_images:
+                    debug("模型可能不支持图片输入，去掉图片重试...")
+                    for msg in history['messages']:
+                        if isinstance(msg.get('content'), list):
+                            text_parts = [
+                                p['text'] for p in msg['content']
+                                if isinstance(p, dict) and p.get('type') == 'text'
+                            ]
+                            msg['content'] = ' '.join(text_parts) if text_parts else ''
+                    resp = requests.post(api, json=history, headers=headers,
+                                         stream=True, timeout=timeout)
             resp.raise_for_status()
 
             content, tool_calls = _stream_response(resp, engine_type)
@@ -860,6 +885,7 @@ def answer():
             history["messages"].append(assistant_msg)
 
             # 逐个执行工具
+            pending_images = []  # 收集图片，等所有 tool results 发完后再注入
             for tc in tool_calls:
                 func_name = tc['function']['name']
                 func_args = tc['function']['arguments']
@@ -873,20 +899,47 @@ def answer():
 
                 result = execute_tool(func_name, func_args, base_dir)
 
-                # 输出截断的结果预览
-                preview = result[:200].replace('\n', '\\n')
-                if len(result) > 200:
-                    preview += '...'
-                debug(f"[Result: {func_name}] {preview}")
+                # 检查是否为图片结果
+                if isinstance(result, dict) and result.get('_image'):
+                    text_result = result['text']
+                    debug(f"[Result: {func_name}] {text_result}")
 
-                # 将工具结果加入历史
-                tool_msg = {"role": "tool", "content": result}
-                if tc.get('id'):
-                    tool_msg["tool_call_id"] = tc['id']
-                if engine_type == 'ollama':
-                    # Ollama 不需要 tool_call_id
-                    tool_msg.pop("tool_call_id", None)
-                history["messages"].append(tool_msg)
+                    # 工具结果（文本说明）
+                    tool_msg = {"role": "tool", "content": text_result}
+                    if tc.get('id'):
+                        tool_msg["tool_call_id"] = tc['id']
+                    if engine_type == 'ollama':
+                        tool_msg.pop("tool_call_id", None)
+                    history["messages"].append(tool_msg)
+
+                    # 暂存图片，稍后注入
+                    pending_images.append(result['base64'])
+                else:
+                    # 普通文本结果
+                    if isinstance(result, str):
+                        preview = result[:200].replace('\n', '\\n')
+                        if len(result) > 200:
+                            preview += '...'
+                    else:
+                        preview = str(result)[:200]
+                    debug(f"[Result: {func_name}] {preview}")
+
+                    tool_msg = {"role": "tool", "content": result if isinstance(result, str) else str(result)}
+                    if tc.get('id'):
+                        tool_msg["tool_call_id"] = tc['id']
+                    if engine_type == 'ollama':
+                        tool_msg.pop("tool_call_id", None)
+                    history["messages"].append(tool_msg)
+
+            # 所有 tool results 发完后，注入图片到 user 消息中
+            # 使用 images 字段统一存储，由 convert_multimodal_messages 在请求前转格式
+            if pending_images:
+                img_msg = {
+                    "role": "user",
+                    "content": "[Image from view_image tool]",
+                    "images": pending_images
+                }
+                history["messages"].append(img_msg)
 
             verbose_debug(f"tool round {tool_round + 1} completed, continuing...")
 
@@ -903,6 +956,11 @@ def answer():
     except requests.exceptions.HTTPError as e:
         print()
         debug(f"HTTP error occurred: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            try:
+                debug(f"Response body: {e.response.text[:500]}")
+            except Exception:
+                pass
     except Exception as e:
         print()
         debug(f"Unexpected error occurred: {e}")

@@ -11,7 +11,7 @@ let documentProcesses = new Map();
  * 返回 {cmd, args} 对象
  * 搜索顺序: 1. pip安装的命令 2. 扩展目录脚本 3. 工作区目录
  */
-function findLLMEngine(extensionPath) {
+function findLLMEngine() {
     // 1. 检查pip安装的命令（推荐方式）
     try {
         execFileSync('llm_engine', ['--help'], { stdio: 'ignore', timeout: 3000 });
@@ -26,27 +26,13 @@ function findLLMEngine(extensionPath) {
         // 继续查找
     }
 
-    // 以下为向后兼容的查找方式
+    // 2. 尝试 python -m llm_engine
     const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
-
-    // 2. 检查扩展目录
-    let enginePath = path.join(extensionPath, 'llm_engine.py');
-    if (fs.existsSync(enginePath)) {
-        return { cmd: pythonPath, args: [enginePath] };
-    }
-
-    // 3. 检查扩展父目录
-    enginePath = path.join(extensionPath, '..', 'llm_engine.py');
-    if (fs.existsSync(enginePath)) {
-        return { cmd: pythonPath, args: [enginePath] };
-    }
-
-    // 4. 检查工作区目录
-    if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0) {
-        enginePath = path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, 'llm_engine.py');
-        if (fs.existsSync(enginePath)) {
-            return { cmd: pythonPath, args: [enginePath] };
-        }
+    try {
+        execFileSync(pythonPath, ['-m', 'llm_engine', '--help'], { stdio: 'ignore', timeout: 3000 });
+        return { cmd: pythonPath, args: ['-m', 'llm_engine'] };
+    } catch (e) {
+        // 继续查找
     }
 
     return null;
@@ -112,7 +98,7 @@ function activate(context) {
         }
 
         // 查找llm_engine
-        const engineInfo = findLLMEngine(realExtensionPath);
+        const engineInfo = findLLMEngine();
         if (!engineInfo) {
             vscode.window.showErrorMessage(
                 'llm_engine 未找到。请运行: pip install llm-engine'
