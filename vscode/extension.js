@@ -86,9 +86,6 @@ function activate(context) {
         const range = new vscode.Range(0, 0, currentLine, document.lineAt(currentLine).text.length);
         const inputText = document.getText(range);
 
-        // 找到Python可执行文件路径
-        const pythonPath = process.platform === 'win32' ? 'python' : 'python3';
-
         // 解析符号链接，获取真实路径
         let realExtensionPath = context.extensionPath;
         try {
@@ -118,6 +115,33 @@ function activate(context) {
             documentProcesses.delete(documentUri);
         }
 
+        // 生成期间设为只读，防止用户编辑导致内容错乱
+        let readOnlyDisposable = null;
+        try {
+            readOnlyDisposable = vscode.workspace.onWillSaveTextDocument(e => {
+                if (e.document.uri.toString() === documentUri) {
+                    e.waitUntil(Promise.resolve([]));
+                }
+            });
+            // 使用 VSCode API 禁止编辑（通过拦截输入）
+            await vscode.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession');
+        } catch (err) {
+            // 旧版VSCode可能不支持此命令，忽略
+        }
+
+        // 恢复编辑器可写状态的辅助函数
+        function restoreWritable() {
+            if (readOnlyDisposable) {
+                readOnlyDisposable.dispose();
+                readOnlyDisposable = null;
+            }
+            try {
+                vscode.commands.executeCommand('workbench.action.files.setActiveEditorWriteableInSession');
+            } catch (err) {
+                // ignore
+            }
+        }
+
         // 显示状态消息
         vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
@@ -133,7 +157,6 @@ function activate(context) {
 
                 let outputBuffer = '';
                 let errorBuffer = '';
-                let lastUpdateLength = 0;
 
                 // 发送输入
                 proc.stdin.write(inputText);
@@ -143,7 +166,8 @@ function activate(context) {
                 proc.stdout.on('data', (data) => {
                     outputBuffer += data.toString();
 
-                    // 实时更新编辑器内容
+                    // 临时恢复可写以更新内容
+                    restoreWritable();
                     editor.edit(editBuilder => {
                         // 删除之前的内容
                         const fullRange = new vscode.Range(
@@ -160,9 +184,11 @@ function activate(context) {
                         const lastLineLength = editor.document.lineAt(lastLine).text.length;
                         editor.selection = new vscode.Selection(lastLine, lastLineLength, lastLine, lastLineLength);
                         editor.revealRange(new vscode.Range(lastLine, 0, lastLine, 0));
+                        // 重新设为只读
+                        try {
+                            vscode.commands.executeCommand('workbench.action.files.setActiveEditorReadonlyInSession');
+                        } catch (err) { }
                     });
-
-                    lastUpdateLength = outputBuffer.length;
                 });
 
                 // 处理错误
@@ -175,9 +201,16 @@ function activate(context) {
                     if (documentProcesses.has(documentUri)) {
                         const proc = documentProcesses.get(documentUri);
                         if (proc && !proc.killed) {
-                            proc.kill();
+                            proc.kill('SIGTERM');
+                            // 1秒后SIGKILL兜底
+                            setTimeout(() => {
+                                if (proc && !proc.killed) {
+                                    try { proc.kill('SIGKILL'); } catch (e) { }
+                                }
+                            }, 1000);
                         }
                         documentProcesses.delete(documentUri);
+                        restoreWritable();
                         reject(new Error('Generation cancelled by user'));
                     }
                 });
@@ -185,6 +218,7 @@ function activate(context) {
                 // 进程完成
                 proc.on('close', (code) => {
                     documentProcesses.delete(documentUri);
+                    restoreWritable();
 
                     if (code === 0) {
                         // 最终确保内容完整
@@ -213,6 +247,7 @@ function activate(context) {
                 // 处理进程错误
                 proc.on('error', (err) => {
                     documentProcesses.delete(documentUri);
+                    restoreWritable();
                     vscode.window.showErrorMessage(`Failed to start LLM process: ${err.message}`);
                     reject(err);
                 });
@@ -230,10 +265,20 @@ function activate(context) {
 
         const documentUri = editor.document.uri.toString();
         if (documentProcesses.has(documentUri)) {
-            const process = documentProcesses.get(documentUri);
-            if (process && !process.killed) {
-                process.kill();
+            const proc = documentProcesses.get(documentUri);
+            if (proc && !proc.killed) {
+                proc.kill('SIGTERM');
+                // 1秒后SIGKILL兜底
+                setTimeout(() => {
+                    if (proc && !proc.killed) {
+                        try { proc.kill('SIGKILL'); } catch (e) { }
+                    }
+                }, 1000);
                 documentProcesses.delete(documentUri);
+                // 恢复可编辑
+                try {
+                    vscode.commands.executeCommand('workbench.action.files.setActiveEditorWriteableInSession');
+                } catch (err) { }
                 vscode.window.showInformationMessage('LLM generation stopped');
             } else {
                 vscode.window.showInformationMessage('No active LLM generation for this document');
