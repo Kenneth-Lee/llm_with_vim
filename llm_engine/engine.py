@@ -13,6 +13,20 @@ import signal
 import re
 import base64
 
+# SIGTERM 处理：收到信号时关闭流式连接并退出
+_active_response = None
+
+def _sigterm_handler(signum, frame):
+    global _active_response
+    if _active_response is not None:
+        try:
+            _active_response.close()
+        except Exception:
+            pass
+    sys.exit(1)
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
 # Python 2/3 兼容
 if sys.version_info[0] == 2:
     import ConfigParser as configparser
@@ -104,12 +118,12 @@ def _make_ollama_api(host, api='chat'):
 
 def debug(msg):
     """输出调试信息到stdout（作为注释）"""
-    print(f"// {msg}", flush=True)
+    print(f"@// {msg}", flush=True)
 
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
     if _verbose_mode:
-        print(f"// {msg}", flush=True)
+        print(f"@// {msg}", flush=True)
 
 def _encode_image(image_path, base_dir=''):
     """读取图片并转为 base64"""
@@ -188,7 +202,7 @@ def _parse_input():
     核心设计：
     - 所有文件（主文件和头文件）都一行一行顺序处理
     - 维护当前角色状态，延续内容追加到当前角色
-    - 遇到@inc时压栈，处理完头文件后弹栈继续，保持角色状态连续
+    - 遇到@@inc时压栈，处理完头文件后弹栈继续，保持角色状态连续
     - 支持 $$图片路径$$ 语法嵌入多模态内容
     """
     global _config
@@ -272,7 +286,7 @@ def _parse_input():
             # 如果有图片，添加图片引用注释
             if images:
                 for img in images:
-                    output_lines.append(f"// Image: {img['full_path']}\n")
+                    output_lines.append(f"@// Image: {img['full_path']}\n")
 
     while stack:
         current_lines, line_idx, base_dir, depth, is_main_file = stack[-1]
@@ -285,22 +299,25 @@ def _parse_input():
                 # 所有文件处理完毕
                 flush_role()
                 break
+            # 包含文件处理完毕，flush当前角色防止跨文件延续
+            flush_role()
+            current_role = 'none'
             continue
 
         line = current_lines[line_idx]
         stack[-1] = (current_lines, line_idx + 1, base_dir, depth, is_main_file)
 
         # 处理不同类型的行
-        if line.startswith("/"):                # 调试信息，忽略
+        if line.startswith("@//"):              # 临时注释/调试信息，忽略
             continue
 
-        elif line.startswith("#"):              # 注释
+        elif line.startswith("@##"):             # 长久注释
             flush_role()
             if is_main_file:
                 output_lines.append(line)
             current_role = 'none'
 
-        elif line.startswith("@inc "):           # @inc 原语
+        elif line.startswith("@@inc "):          # @@inc 原语
             flush_role()
             if is_main_file:
                 output_lines.append(line)
@@ -308,27 +325,27 @@ def _parse_input():
 
             # 检查深度限制
             if depth >= MAX_DEPTH:
-                debug(f"@inc: maximum nesting depth ({MAX_DEPTH}) exceeded")
+                debug(f"@@inc: maximum nesting depth ({MAX_DEPTH}) exceeded")
                 continue
 
             # 解析文件名
             parts = line.strip().split(None, 1)
             if len(parts) < 2:
-                debug(f"Invalid @inc directive: {line.strip()}")
+                debug(f"Invalid @@inc directive: {line.strip()}")
                 continue
 
             filename = parts[1].strip()
 
             # 验证文件名
             if os.path.isabs(filename) or '..' in filename:
-                debug(f"@inc: invalid path: {filename}")
+                debug(f"@@inc: invalid path: {filename}")
                 continue
 
             # 构建完整路径
             file_path = os.path.join(base_dir, filename) if base_dir else filename
             file_path = os.path.normpath(file_path)
             if '..' in file_path:
-                debug(f"@inc: path traversal not allowed: {filename}")
+                debug(f"@@inc: path traversal not allowed: {filename}")
                 continue
 
             # 读取被包含的文件
@@ -336,7 +353,7 @@ def _parse_input():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
             except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
-                debug(f"@inc: error reading {filename}: {e}")
+                debug(f"@@inc: error reading {filename}: {e}")
                 continue
 
             # 获取被包含文件的目录
@@ -384,7 +401,7 @@ def _parse_input():
                         # 输出原始行和图片注释
                         output_lines.append(line)
                         for img in current_images:
-                            output_lines.append(f"// Image: {img['full_path']}\n")
+                            output_lines.append(f"@// Image: {img['full_path']}\n")
                         role_outputted = True
                     else:
                         output_lines.append(line)
@@ -681,16 +698,16 @@ def answer():
                 if 'data' in data:
                     models = [m['id'] for m in data['data']]
         except Exception as e:
-            print(f"// 查询模型失败: {e}")
+            print(f"@// 查询模型失败: {e}")
             sys.exit(0)
 
         if models:
-            print(f"// 可用模型列表 (共 {len(models)} 个):")
+            print(f"@// 可用模型列表 (共 {len(models)} 个):")
             for m in models:
-                print(f"//   {m}")
-            print("// 请将 Configure 中的 model 设置为上述模型之一")
+                print(f"@//   {m}")
+            print("@// 请将 Configure 中的 model 设置为上述模型之一")
         else:
-            print("// 未找到可用模型")
+            print("@// 未找到可用模型")
         sys.exit(0)
 
     # 没有给用户配置的生成一个
@@ -833,6 +850,7 @@ def answer():
                 history['messages'], engine_type)
             resp = requests.post(api, json=history, headers=headers,
                                  stream=True, timeout=timeout)
+            _active_response = resp
             # 如果 400 且含图片，可能是模型不支持视觉，去掉图片重试
             if resp.status_code == 400:
                 has_images = any(
@@ -852,6 +870,7 @@ def answer():
                             msg['content'] = ' '.join(text_parts) if text_parts else ''
                     resp = requests.post(api, json=history, headers=headers,
                                          stream=True, timeout=timeout)
+                    _active_response = resp
             resp.raise_for_status()
 
             content, tool_calls = _stream_response(resp, engine_type)
@@ -964,5 +983,7 @@ def answer():
     except Exception as e:
         print()
         debug(f"Unexpected error occurred: {e}")
+    finally:
+        _active_response = None
 
-    print(f"//updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", end='')
+    print(f"@//updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", end='')

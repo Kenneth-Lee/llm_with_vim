@@ -18,7 +18,7 @@ llm_engine = "llm_engine:main"
 llm-engine = "llm_engine:main"
 
 [tool.setuptools.dynamic]
-version = {file = "VERSION"}
+version = {attr = "llm_engine.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["llm_engine*"]

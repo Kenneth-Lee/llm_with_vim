@@ -3,8 +3,8 @@ System: 你是一个视觉助手，可以分析图片内容。
 
 User: 请描述这张图片的内容。
 $$screenshot.png$$
-// Image: screenshot.png
-// ===========>
+@// Image: screenshot.png
+@// ===========>
 Assistant: 这张图片展示了一个**深色背景的终端/命令行界面截图**，内容为一个用户（User）与AI助手（Assistant）之间的对话记录，主要围绕“1+1”的连续加法问题展开。以下是详细描述：
 
 ---
@@ -70,6 +70,6 @@ Configure: {'engine_type': 'ollama', 'server_addr': 'localhost', 'model': 'qwen2
 
 ### **总结**
 这张截图呈现了一个**本地部署的AI对话系统（基于Ollama和Qwen模型）**的交互场景，用户反复追问简单加法问题，但助手的回答存在**系统性逻辑错误**，最终以矛盾的结果结束。界面风格为典型终端，重点突出了用户输入的黄色高亮和异常的数学推导过程。
-//updated at Tue Mar 31 19:15:30 2026 in 29.7 seconds
+@//updated at Tue Mar 31 19:15:30 2026 in 29.7 seconds
 User:
 

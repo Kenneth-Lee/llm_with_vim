@@ -1,18 +1,18 @@
 Configure: {'engine_type': 'ollama', 'model': 'glm-5.1:cloud', 'tools': ['read', 'bash', 'search', 'web_fetch']}
 User: 现在最新的关于LLM的tool的研究论文都有哪些？给我推荐几篇好的让我去学习一下。
-// ===========>
+@// ===========>
 Assistant: 好的！我来帮你搜索一下关于 LLM Tool Use / Tool Calling 方向的最新研究论文。让我从多个渠道搜集信息。
-// [Tool: web_fetch] {"url": "https://huggingface.co/papers?q=tool+use+LLM"}
-// [Result: web_fetch] Error fetching URL: HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /papers?q=tool+use+LLM (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection objec...
+@// [Tool: web_fetch] {"url": "https://huggingface.co/papers?q=tool+use+LLM"}
+@// [Result: web_fetch] Error fetching URL: HTTPSConnectionPool(host='huggingface.co', port=443): Max retries exceeded with url: /papers?q=tool+use+LLM (Caused by ConnectTimeoutError(<urllib3.connection.HTTPSConnection objec...
 
-// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=LLM+tool+use&searchtype=all&order=-announced_date_first"}
-// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+@// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=LLM+tool+use&searchtype=all&order=-announced_date_first"}
+@// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
 
-// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool-augmented+large+language+model+survey&searchtype=all&order=-announced_date_first"}
-// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+@// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool-augmented+large+language+model+survey&searchtype=all&order=-announced_date_first"}
+@// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
 
-// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool+calling+LLM+benchmark+training&searchtype=all&order=-announced_date_first"}
-// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
+@// [Tool: web_fetch] {"url": "https://arxiv.org/search/?query=tool+calling+LLM+benchmark+training&searchtype=all&order=-announced_date_first"}
+@// [Result: web_fetch] Search | arXiv e-print repository\n\n    \n  \n  \n  \n\n  \n  \n\n  \n  \n  \n  \n  Skip to main content\n    \n    \n\n  \n    \n  \n  We gratefully acknowledge support from the Simons Foundation, member institutions, a...
 根据我从多个搜索渠道汇总的结果，下面为你精心整理了一份**关于 LLM Tool Use（工具使用/工具调用）方向的最新高质量论文推荐清单**，按主题分类，方便你系统学习。
 
 ---
@@ -168,6 +168,6 @@ Assistant: 好的！我来帮你搜索一下关于 LLM Tool Use / Tool Calling �
 ```
 
 这些论文基本代表了2025-2026年LLM Tool Use方向最前沿的研究。如果你对某个子方向特别感兴趣，我可以进一步深挖推荐！
-//updated at Thu Apr  9 20:01:31 2026 in 270.0 seconds
+@//updated at Thu Apr  9 20:01:31 2026 in 270.0 seconds
 User:
 

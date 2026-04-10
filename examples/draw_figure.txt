@@ -1,4 +1,4 @@
-// 这个例子使用一个局域网的主机（klmm.local)的ollama服务，用gpt-oss:20b的模型生成一个测试数据的matplotlib的展示图。
+@// 这个例子使用一个局域网的主机（klmm.local)的ollama服务，用gpt-oss:20b的模型生成一个测试数据的matplotlib的展示图。
 Configure:  {'engine_type': 'ollama', 'server_addr': 'klmm.local', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600}
 User: 下面是一个测试结果，测试了四种不同的实现：redis, pqm, blkring和gqm每个在四个不同配置（nomt-c50, mt10-c50等）的测试结果。结果包括4部分，ping, get, set和lrange_600，每个部分有两个结果，分别表示Kilo-Request Per second，和milliseconds时延：
 
@@ -157,7 +157,7 @@ plt.show()
 
 祝你玩得愉快，若有任何疑问随时提问！
 User: 我希望每个分类对比可以靠得近一点以方便对比，比如同是nomt-c50这个测试，我希望redis/pqm/blkring/gqm的柱状图是靠在一起的。
-// ===========>
+@// ===========>
 
 Assistant: 下面给出一份 **完整、可直接跑通的 Python 代码**，它把你给出的测试结果绘成 **4 × 2** 的子图（上排为 **KRPS**，下排为 **延迟(ms)**），  
 **同一配置（`nomt‑c50 / mt10‑c50 / mt50‑c50 / mt100‑c100`）的 4 个实现（redis / pqm / blkring / gqm）** 的柱子 **靠在一起**，便于横向对比。

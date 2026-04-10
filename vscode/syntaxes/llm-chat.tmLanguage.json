@@ -20,11 +20,15 @@
       "patterns": [
         {
           "name": "comment.line.double-slash.llm-chat",
-          "match": "^//.*$"
+          "match": "^@//.*$"
         },
         {
           "name": "comment.line.number-sign.llm-chat",
-          "match": "^#.*$"
+          "match": "^@##.*$"
+        },
+        {
+          "name": "keyword.other.include.llm-chat",
+          "match": "^@@inc\\b.*$"
         }
       ]
     },

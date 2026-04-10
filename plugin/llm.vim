@@ -42,8 +42,113 @@ let s:env_status = {'checked': 0, 'ok': 0}
 " outline的文件名（该文件不需要保存）
 let s:outline_bname = 'diaglog-outline.buffer'
 
-" 把[1,当前行]发入llm_engine获取输出
+" === 非阻塞LLM请求状态 ===
+let s:gen_job = v:null
+let s:gen_timer = -1
+let s:gen_state = {}
+
+" 中断LLM请求
+function! s:StopGen()
+	if s:gen_job == v:null || job_status(s:gen_job) != 'run'
+		return
+	endif
+	let s:gen_state.int_by_key = 1
+	call job_stop(s:gen_job)
+	" 1秒后仍未退出则SIGKILL
+	call timer_start(1000, function('s:KillGenFallback'))
+endfunction
+
+function! s:KillGenFallback(timer_id)
+	if s:gen_job != v:null && job_status(s:gen_job) == 'run'
+		call job_stop(s:gen_job, 'kill')
+	endif
+endfunction
+
+" 临时解除nomodifiable写入目标buffer，写完恢复
+function! s:BufWrite(buf, lnum, text)
+	call setbufvar(a:buf, '&modifiable', 1)
+	call appendbufline(a:buf, a:lnum, a:text)
+	call setbufvar(a:buf, '&modifiable', 0)
+endfunction
+
+function! s:BufSetLine(buf, lnum, text)
+	call setbufvar(a:buf, '&modifiable', 1)
+	call setbufline(a:buf, a:lnum, a:text)
+	call setbufvar(a:buf, '&modifiable', 0)
+endfunction
+
+" 输出回调（每次一行，写入目标buffer而非当前buffer）
+function! s:HandleGenOutput(channel, msg)
+	let s = s:gen_state
+	if !bufexists(s.target_buf) | return | endif
+	if s.line_no
+		call s:BufWrite(s.target_buf, s.line_no, a:msg)
+	else
+		call s:BufSetLine(s.target_buf, 1, a:msg)
+	endif
+	let s.line_no += 1
+	" 仅当用户在目标buffer中时才移动光标
+	if bufnr('%') == s.target_buf
+		call cursor(s.line_no, 1)
+	endif
+	redraw
+endfunction
+
+" 错误回调
+function! s:HandleGenErr(channel, msg)
+	let s = s:gen_state
+	if !bufexists(s.target_buf) | return | endif
+	call s:BufWrite(s.target_buf, 0, a:msg)
+	let s.interrupted = 2
+endfunction
+
+" 进程退出回调（清理工作）
+function! s:HandleGenExit(job, status)
+	if s:gen_timer >= 0
+		call timer_stop(s:gen_timer)
+		let s:gen_timer = -1
+	endif
+	let s = s:gen_state
+	let &laststatus = s.old_lst
+	let &statusline = ''
+	if bufexists(s.temp_buf)
+		execute 'bdelete! ' . s.temp_buf
+	endif
+	if bufexists(s.target_buf)
+		" 恢复modifiable状态（生成期间被设为nomodifiable）
+		call setbufvar(s.target_buf, '&modifiable', 1)
+		if s.int_by_key
+			call appendbufline(s.target_buf, s.line_no, '<<===中断操作===>>')
+		elseif s.interrupted
+			call appendbufline(s.target_buf, s.line_no, '<<===执行错误，尽快undo，不要存盘！！===>>')
+		else
+			call appendbufline(s.target_buf, s.line_no, 'User: ')
+		endif
+		if bufnr('%') == s.target_buf
+			call cursor(s.line_no + 1, 1)
+		endif
+	endif
+	let s:gen_job = v:null
+	redraw
+endfunction
+
+" 状态栏定时器
+function! s:GenTimerCb(timer_id)
+	let elapsed = localtime() - s:gen_state.start_sec
+	let &statusline = '请求LLM（' . elapsed . '秒），按K（大写）中断...'
+	redraw
+endfunction
+
+" 把[1,当前行]发入llm_engine获取输出（非阻塞，用户可浏览文件）
 function! DoGen()
+	" 防止并发请求
+	if s:gen_job != v:null && job_status(s:gen_job) == 'run'
+		echohl WarningMsg
+		echo 'LLM请求进行中，按K中断当前请求'
+		echohl None
+		return
+	endif
+
 	" 检查环境
 	if !s:env_status.checked || !s:env_status.ok
 		let s:env_status = s:CheckEnvironment()
@@ -70,88 +175,38 @@ function! DoGen()
 	execute '1,.d'
 	normal O
 
-	" 输出位置，0表示初始状态
-	let l:line_no = 0
-	let l:interrupted = 0
-	let l:int_by_key = 0
+	" 生成期间设为只读，防止用户编辑导致行号错位
+	setlocal nomodifiable
 
-	" 输出回调（每次输出一行）
-	function! HandleOutput(channel, msg) closure
-		if l:line_no
-			call append(l:line_no, a:msg)
-		else
-			call setline(1, a:msg)
-		endif
-
-		let l:line_no += 1
-		call cursor(l:line_no, 1)
-		redraw
-	endfunction
-
-	" 输出错误
-	function! HandleErr(channel, msg) closure
-		call append(0, a:msg)
-		let l:interrupted = 2
-	endfunction
+	" 初始化状态
+	let s:gen_state = {
+		\ 'target_buf': l:current_buf,
+		\ 'temp_buf': l:temp_buf,
+		\ 'line_no': 0,
+		\ 'interrupted': 0,
+		\ 'int_by_key': 0,
+		\ 'old_lst': &laststatus,
+		\ 'start_sec': localtime(),
+	\ }
 
 	" 构建命令
 	let l:file_dir = expand('%:p:h')
 	let l:cmd = s:env_status.engine
 
-	" 异步请求LLM，添加环境变量
-	let l:job = job_start(l:cmd, {
+	" 异步请求LLM（exit_cb在进程退出后清理）
+	let s:gen_job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
-		\ 'out_cb': function('HandleOutput'),
-		\ 'err_cb': function('HandleErr'),
+		\ 'out_cb': function('s:HandleGenOutput'),
+		\ 'err_cb': function('s:HandleGenErr'),
+		\ 'exit_cb': function('s:HandleGenExit'),
 		\ 'env': {'LLM_FILE_DIR': l:file_dir},
 	\ })
 
-	let old_lst = &laststatus
+	" 设置状态栏并启动定时器
 	let &laststatus = 2
-	let &stl = '请求LLM...'
-	let waitm = 0
-
-	while job_status(l:job) == 'run'
-		" 清空并检查所有待处理的按键
-		let l:key = 0
-		while 1
-			let l:key = getchar(1)
-			if l:key == 0
-				break  " 没有更多按键了
-			endif
-			if l:key == char2nr('K')
-				let l:interrupted = 2
-				let l:int_by_key = 1
-				call job_stop(l:job)
-				break  " 检测到K键，跳出
-			endif
-			" 其他按键被消费掉，避免污染缓冲区
-		endwhile
-
-		if l:int_by_key
-			break  " 已中断，退出主循环
-		endif
-
-		sleep 50m
-		let waitm += 1
-
-		" 更频繁地更新状态栏（每0.5秒）
-		if (waitm % 5) == 0
-			let &statusline = '请求LLM（' . (waitm/10.0) . '秒），按K（大写）中断...'
-			redraw
-		endif
-	endwhile
-
-	let &laststatus = old_lst
-	execute 'bdelete! ' . l:temp_buf
-	if l:int_by_key == 1
-		normal o<<===中断操作===>>
-	elseif l:interrupted
-		normal o<<===执行错误，尽快undo，不要存盘！！===>>
-	else
-		normal oUser:
-	endif
+	let &statusline = '请求LLM...'
+	let s:gen_timer = timer_start(500, function('s:GenTimerCb'), {'repeat': -1})
 endfunction
 
 " 根据outline的行号退出outline窗口，转到正文对应位置
@@ -263,18 +318,19 @@ function! s:SetupLLMBuffer()
 	endif
 
 	" syntax本来就是针对当前Buffer的
-	syn match comment "^#.*$"
-	syn match comment "^//.*$"
+	syn match comment "^@##.*$"
+	syn match comment "^@//.*$"
 	syn match Title "^Configure: .*$"
 	" 图片引用语法 $$path$$
 	syn match Special "\$\$[^$]*\$\$"
-	syn keyword Type Assistant System inc
+	syn keyword Type Assistant System
+	syn match Type "^@@inc "
 	syn keyword Keyword User
 
 	" 给当前buffer设置热键
 	nmap <buffer> j gj
 	nmap <buffer> k gk
-	noremap <buffer> K <Nop>
+	nnoremap <buffer> K :call <SID>StopGen()<CR>
 	nmap <buffer> <F1> :call DoGen()<CR>
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
 	" F3: 预览图片（光标在$$...$$位置）
