@@ -1,0 +1,7 @@
+[
+  {
+    "Name": "llm_micro",
+    "Description": "Use llm_engine in micro editor with .llm workflows",
+    "Website": "https://gitee.com/Kenneth-Lee-2012/llm_with_vim"
+  }
+]

@@ -13,11 +13,13 @@ python install.py
 1. pip 安装 llm\_engine 包（提供 `llm_engine` 命令）
 2. 检测 Vim/Neovim/GVim，符号链接插件到 `~/.vim/`（Windows 为 `~/vimfiles/`）
 3. 检测 VSCode/VSCode Insiders/VSCodium，符号链接扩展到扩展目录
+4. 安装 micro 插件到 `~/.config/micro/plug/llm_micro`（Windows 为 `%APPDATA%/micro/plug/llm_micro`）
 
 也可以只安装部分组件：
 ```bash
 python install.py --vim      # 仅安装 Vim 插件
 python install.py --vscode   # 仅安装 VSCode 扩展
+python install.py --micro    # 仅安装 micro 插件
 python install.py --pip      # 仅安装 pip 包
 ```
 
@@ -104,3 +106,29 @@ cd vscode
 vsce package
 code --install-extension llm-chat-0.1.0.vsix
 ```
+
+### micro 插件安装
+
+#### 自动安装（推荐）
+
+```bash
+python install.py --micro
+```
+
+说明：自动安装会把插件目录复制到 micro 插件路径（不是符号链接）。删除项目源码目录后，micro 插件仍可继续使用。
+
+#### 手动安装
+
+```bash
+mkdir -p ~/.config/micro/plug
+ln -s /path/to/llm_with_vim/micro/llm_micro ~/.config/micro/plug/llm_micro
+```
+
+Windows 手动安装目录：`%APPDATA%\\micro\\plug\\llm_micro`
+
+安装后重启 micro，默认快捷键：
+
+- `F1` 提交上下文
+- `Shift+K` 中断请求
+- `F2` 显示大纲
+- `F3` 预览当前行 `$$...$$` 图片

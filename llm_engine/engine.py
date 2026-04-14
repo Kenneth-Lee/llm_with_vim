@@ -60,6 +60,23 @@ _roles = {
     "config":    "Configure: ",
 }
 
+
+def _detect_role_line(line):
+    """检测角色前缀，兼容全角冒号和冒号后无空格写法。"""
+    # 优先使用标准前缀（兼容现有行为）
+    for role_name, role_prefix in _roles.items():
+        if line.startswith(role_prefix):
+            return role_name, line[len(role_prefix):]
+
+    # 宽松匹配：Role[:：][可选空格]content
+    m = re.match(r'^(System|User|Assistant|Configure)\s*[:：]\s?(.*)$', line)
+    if m:
+        role_text = m.group(1).lower()
+        content = m.group(2)
+        return role_text, content
+
+    return None, None
+
 def _load_config():
     """加载配置文件
 
@@ -366,19 +383,12 @@ def _parse_input():
 
         else:                                   # 普通内容行
             # 检查是否是新角色
-            found_role = None
-            for role_name, role_prefix in _roles.items():
-                if line.startswith(role_prefix):
-                    found_role = role_name
-                    break
+            found_role, content_line = _detect_role_line(line)
 
             if found_role:
                 # 新角色，提交当前角色内容
                 flush_role()
                 current_role = found_role
-                # 提取内容（去掉角色前缀）
-                prefix = _roles[found_role]
-                content_line = line[len(prefix):] if line.startswith(prefix) else line
 
                 # 提取图片（仅在 User 角色中处理）
                 if found_role == 'user':
@@ -444,9 +454,13 @@ def _parse_input():
             if not isinstance(uc, dict):
                 raise ValueError("Configuration must be a dictionary/object")
             return history, uc
-        except (json.JSONDecodeError, ValueError, SyntaxError):
+        except (json.JSONDecodeError, ValueError, SyntaxError) as e:
             debug(f"Invalid user config: {user_config}")
-            debug("Configuration must be in JSON format like {\"key\": \"value\"} or Python dict format like {'key': 'value'}")
+            debug(f"Config parse error: {type(e).__name__}: {e}")
+            if re.search(r'(^|\n)\s*(System|User|Assistant|Configure)\s*[:：]', user_config):
+                debug("Hint: Configure 区块中混入了角色行。请确认角色前缀格式正确，并确保 Configure 只包含字典内容。")
+            else:
+                debug("Configuration must be in JSON format like {\"key\": \"value\"} or Python dict format like {'key': 'value'}")
             return history, None
 
     return history, None

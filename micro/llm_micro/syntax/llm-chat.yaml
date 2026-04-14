@@ -1,0 +1,14 @@
+filetype: llm-chat
+
+detect:
+    filename: "\\.llm$"
+
+rules:
+    - comment: "^@//.*$"
+    - comment: "^@##.*$"
+    - preproc: "^@@inc\\b.*$"
+    - identifier: "^Configure:.*$"
+    - statement: "^System:.*$"
+    - special: "^User:.*$"
+    - constant: "^Assistant:.*$"
+    - constant.string: "\\$\\$[^$]+\\$\\$"

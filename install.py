@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-LLM with Vim/VSCode - 插件安装脚本
+LLM with Vim/VSCode/Micro - 插件安装脚本
 
-自动检测本地 Vim 和 VSCode 安装，将插件安装到对应目录。
+自动检测本地 Vim、VSCode 和 micro 安装，将插件安装到对应目录。
 支持 Linux、macOS 和 Windows。
 
 用法:
@@ -11,6 +11,7 @@ LLM with Vim/VSCode - 插件安装脚本
     python install.py --vim     # 仅安装 Vim 插件
     python install.py --vscode  # 仅安装 VSCode 插件
     python install.py --pip     # 仅安装 pip 包
+    python install.py --micro   # 仅安装 micro 插件
 """
 
 import os
@@ -255,6 +256,47 @@ def install_vscode():
     return installed
 
 
+# ==================== micro 插件安装 ====================
+
+def _find_micro_dirs():
+    """返回 micro 插件目录候选列表"""
+    system = platform.system()
+    home = os.path.expanduser('~')
+
+    if system == 'Windows':
+        appdata = os.environ.get('APPDATA', '')
+        if appdata:
+            return [os.path.join(appdata, 'micro', 'plug')]
+        return [os.path.join(home, '.config', 'micro', 'plug')]
+
+    return [os.path.join(home, '.config', 'micro', 'plug')]
+
+
+def install_micro():
+    header('安装 micro 插件')
+
+    src_dir = os.path.join(SCRIPT_DIR, 'micro', 'llm_micro')
+    if not os.path.isdir(src_dir):
+        warn('未找到 micro 插件目录，跳过')
+        return False
+
+    installed = False
+    for plug_dir in _find_micro_dirs():
+        os.makedirs(plug_dir, exist_ok=True)
+        target_dir = os.path.join(plug_dir, 'llm_micro')
+
+        if os.path.islink(target_dir):
+            os.remove(target_dir)
+        elif os.path.isdir(target_dir):
+            shutil.rmtree(target_dir)
+
+        shutil.copytree(src_dir, target_dir)
+        info('micro 插件已安装到: ' + target_dir)
+        installed = True
+
+    return installed
+
+
 # ==================== 工具函数 ====================
 
 def _link_or_copy(src, dst):
@@ -295,6 +337,8 @@ def main():
                         help='仅安装 VSCode 扩展')
     parser.add_argument('--pip', action='store_true',
                         help='仅安装 pip 包')
+    parser.add_argument('--micro', action='store_true',
+                        help='仅安装 micro 插件')
     parser.add_argument('--no-pip', action='store_true',
                         help='跳过 pip 安装')
     parser.add_argument('-v', '--verbose', action='store_true',
@@ -302,9 +346,9 @@ def main():
     args = parser.parse_args()
 
     VERBOSE = args.verbose
-    specific = args.vim or args.vscode or args.pip
+    specific = args.vim or args.vscode or args.pip or args.micro
 
-    print('LLM with Vim/VSCode 安装脚本')
+    print('LLM with Vim/VSCode/Micro 安装脚本')
     print('系统: %s (%s)' % (platform.system(), platform.machine()))
 
     results = []
@@ -321,6 +365,10 @@ def main():
     # VSCode 扩展
     if args.vscode or not specific:
         results.append(('VSCode', install_vscode()))
+
+    # micro 插件
+    if args.micro or not specific:
+        results.append(('micro', install_micro()))
 
     # 总结
     header('安装总结')
