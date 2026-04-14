@@ -84,6 +84,12 @@ micro ~/tmp/test-micro.llm
 > set llm_micro.enginecmd '/absolute/path/to/llm_engine'
 ```
 
+Windows 推荐值（避免 PATH 差异）：
+
+```text
+> set llm_micro.enginecmd 'py -3 -m llm_engine'
+```
+
 ### 3. 中断快捷键说明
 
 Micro 终端环境下 `Shift+K` 通常只是输入大写 `K`，不能稳定作为独立快捷键。Micro 插件默认使用：

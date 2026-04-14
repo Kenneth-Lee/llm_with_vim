@@ -15,6 +15,10 @@ local state = {
 
 math.randomseed(os.Getpid())
 
+local function isWindows()
+    return package.config:sub(1, 1) == "\\"
+end
+
 local function trim(s)
     if s == nil then
         return ""
@@ -29,6 +33,10 @@ end
 
 local function shellEscape(s)
     return "'" .. tostring(s):gsub("'", "'\\''") .. "'"
+end
+
+local function cmdQuote(s)
+    return '"' .. tostring(s):gsub('"', '""') .. '"'
 end
 
 local function fileDir(bp)
@@ -58,11 +66,20 @@ local function lineCount(buf)
 end
 
 local function writeTempInput(content)
-    local base = os.Getenv("TMPDIR")
-    if base == "" then
-        base = "/tmp"
+    local base = ""
+    if isWindows() then
+        base = trim(os.Getenv("TEMP"))
+        if base == "" then
+            base = trim(os.Getenv("TMP"))
+        end
+    else
+        base = trim(os.Getenv("TMPDIR"))
     end
-    local name = string.format("%s/micro_llm_input_%d_%d.llm", base, os.Getpid(), math.floor(math.random() * 1000000000))
+    if base == "" then
+        base = isWindows() and "." or "/tmp"
+    end
+    local sep = isWindows() and "\\" or "/"
+    local name = string.format("%s%smicro_llm_input_%d_%d.llm", base, sep, os.Getpid(), math.floor(math.random() * 1000000000))
     local f, err = io.open(name, "w")
     if f == nil then
         return nil, err
@@ -79,6 +96,13 @@ local function removeFile(path)
 end
 
 local function userShellPath()
+    if isWindows() then
+        local pwsh = trim(os.Getenv("COMSPEC"))
+        if pwsh == "" then
+            pwsh = "cmd.exe"
+        end
+        return pwsh
+    end
     local sh = trim(os.Getenv("SHELL"))
     if sh == "" then
         sh = "/bin/sh"
@@ -87,6 +111,10 @@ local function userShellPath()
 end
 
 local function wrapWithUserShell(cmd)
+    if isWindows() then
+        local sh = userShellPath()
+        return cmdQuote(sh) .. " /d /s /c " .. cmdQuote(cmd)
+    end
     local sh = userShellPath()
     return shellEscape(sh) .. " -lc " .. shellEscape(cmd)
 end
@@ -111,24 +139,46 @@ local function findEngine()
         return envConfigured
     end
 
-    local out1, err1 = runUserShellCommand("command -v llm_engine >/dev/null 2>&1 && echo llm_engine")
-    if err1 == nil and out1 ~= nil and out1:find("llm_engine") ~= nil then
-        return "llm_engine"
-    end
+    if isWindows() then
+        local out1, err1 = runUserShellCommand("where llm_engine >nul 2>&1 && echo llm_engine")
+        if err1 == nil and out1 ~= nil and out1:find("llm_engine") ~= nil then
+            return "llm_engine"
+        end
 
-    local out2, err2 = runUserShellCommand("command -v llm-engine >/dev/null 2>&1 && echo llm-engine")
-    if err2 == nil and out2 ~= nil and out2:find("llm-engine") ~= nil then
-        return "llm-engine"
-    end
+        local out2, err2 = runUserShellCommand("where llm-engine >nul 2>&1 && echo llm-engine")
+        if err2 == nil and out2 ~= nil and out2:find("llm-engine") ~= nil then
+            return "llm-engine"
+        end
 
-    local out3, err3 = runUserShellCommand("command -v python3 >/dev/null 2>&1 && python3 -m llm_engine --help >/dev/null 2>&1 && echo ok")
-    if err3 == nil and out3 ~= nil and out3:find("ok") ~= nil then
-        return "python3 -m llm_engine"
-    end
+        local out3, err3 = runUserShellCommand("where py >nul 2>&1 && py -3 -m llm_engine --help >nul 2>&1 && echo ok")
+        if err3 == nil and out3 ~= nil and out3:find("ok") ~= nil then
+            return "py -3 -m llm_engine"
+        end
 
-    local out4, err4 = runUserShellCommand("command -v python >/dev/null 2>&1 && python -m llm_engine --help >/dev/null 2>&1 && echo ok")
-    if err4 == nil and out4 ~= nil and out4:find("ok") ~= nil then
-        return "python -m llm_engine"
+        local out4, err4 = runUserShellCommand("where python >nul 2>&1 && python -m llm_engine --help >nul 2>&1 && echo ok")
+        if err4 == nil and out4 ~= nil and out4:find("ok") ~= nil then
+            return "python -m llm_engine"
+        end
+    else
+        local out1, err1 = runUserShellCommand("command -v llm_engine >/dev/null 2>&1 && echo llm_engine")
+        if err1 == nil and out1 ~= nil and out1:find("llm_engine") ~= nil then
+            return "llm_engine"
+        end
+
+        local out2, err2 = runUserShellCommand("command -v llm-engine >/dev/null 2>&1 && echo llm-engine")
+        if err2 == nil and out2 ~= nil and out2:find("llm-engine") ~= nil then
+            return "llm-engine"
+        end
+
+        local out3, err3 = runUserShellCommand("command -v python3 >/dev/null 2>&1 && python3 -m llm_engine --help >/dev/null 2>&1 && echo ok")
+        if err3 == nil and out3 ~= nil and out3:find("ok") ~= nil then
+            return "python3 -m llm_engine"
+        end
+
+        local out4, err4 = runUserShellCommand("command -v python >/dev/null 2>&1 && python -m llm_engine --help >/dev/null 2>&1 && echo ok")
+        if err4 == nil and out4 ~= nil and out4:find("ok") ~= nil then
+            return "python -m llm_engine"
+        end
     end
 
     local home = trim(os.Getenv("HOME"))
@@ -136,13 +186,33 @@ local function findEngine()
     if home ~= "" then
         table.insert(absCandidates, home .. "/.local/bin/llm_engine")
     end
-    table.insert(absCandidates, "/usr/local/bin/llm_engine")
-    table.insert(absCandidates, "/usr/bin/llm_engine")
+    if isWindows() then
+        local userProfile = trim(os.Getenv("USERPROFILE"))
+        local appData = trim(os.Getenv("APPDATA"))
+        if userProfile ~= "" then
+            table.insert(absCandidates, userProfile .. "\\AppData\\Roaming\\Python\\Python311\\Scripts\\llm_engine.exe")
+            table.insert(absCandidates, userProfile .. "\\AppData\\Roaming\\Python\\Python310\\Scripts\\llm_engine.exe")
+            table.insert(absCandidates, userProfile .. "\\AppData\\Roaming\\Python\\Python39\\Scripts\\llm_engine.exe")
+            table.insert(absCandidates, userProfile .. "\\.local\\bin\\llm_engine.exe")
+        end
+        if appData ~= "" then
+            table.insert(absCandidates, appData .. "\\Python\\Scripts\\llm_engine.exe")
+        end
+    else
+        table.insert(absCandidates, "/usr/local/bin/llm_engine")
+        table.insert(absCandidates, "/usr/bin/llm_engine")
+    end
 
     local i
     for i = 1, #absCandidates do
         local c = absCandidates[i]
-        local out, err = runUserShellCommand("test -x " .. shellEscape(c) .. " && echo ok")
+        local out = nil
+        local err = nil
+        if isWindows() then
+            out, err = runUserShellCommand('if exist ' .. cmdQuote(c) .. ' (echo ok)')
+        else
+            out, err = runUserShellCommand("test -x " .. shellEscape(c) .. " && echo ok")
+        end
         if err == nil and out ~= nil and out:find("ok") ~= nil then
             return c
         end
@@ -159,13 +229,21 @@ function Doctor(bp)
     local envCmd = trim(os.Getenv("LLM_ENGINE_CMD"))
     local optCmd1 = config.GetGlobalOption("llm_micro.enginecmd")
     local optCmd2 = config.GetGlobalOption("plugin.llm_micro.enginecmd")
-    local cmdOut, _ = runUserShellCommand("command -v llm_engine 2>/dev/null || true")
-    local cmdOut2, _ = runUserShellCommand("command -v llm-engine 2>/dev/null || true")
+    local cmdOut = ""
+    local cmdOut2 = ""
+    if isWindows() then
+        cmdOut, _ = runUserShellCommand("where llm_engine 2>nul")
+        cmdOut2, _ = runUserShellCommand("where llm-engine 2>nul")
+    else
+        cmdOut, _ = runUserShellCommand("command -v llm_engine 2>/dev/null || true")
+        cmdOut2, _ = runUserShellCommand("command -v llm-engine 2>/dev/null || true")
+    end
 
     table.insert(lines, "[llm_micro doctor]")
     table.insert(lines, "HOME=" .. (home ~= "" and home or "(empty)"))
     table.insert(lines, "PATH=" .. (path ~= "" and path or "(empty)"))
     table.insert(lines, "SHELL=" .. userShellPath())
+    table.insert(lines, "PLATFORM=" .. (isWindows() and "windows" or "posix"))
     table.insert(lines, "LLM_ENGINE_CMD(env)=" .. (envCmd ~= "" and envCmd or "(empty)"))
     if type(optCmd1) == "string" and trim(optCmd1) ~= "" then
         table.insert(lines, "llm_micro.enginecmd(option)=" .. trim(optCmd1))
@@ -177,8 +255,13 @@ function Doctor(bp)
     else
         table.insert(lines, "plugin.llm_micro.enginecmd(option)=(empty)")
     end
-    table.insert(lines, "command -v llm_engine => " .. trim(cmdOut))
-    table.insert(lines, "command -v llm-engine => " .. trim(cmdOut2))
+    if isWindows() then
+        table.insert(lines, "where llm_engine => " .. trim(cmdOut))
+        table.insert(lines, "where llm-engine => " .. trim(cmdOut2))
+    else
+        table.insert(lines, "command -v llm_engine => " .. trim(cmdOut))
+        table.insert(lines, "command -v llm-engine => " .. trim(cmdOut2))
+    end
 
     local resolved = findEngine()
     table.insert(lines, "resolved engine => " .. (resolved or "(not found)"))
@@ -329,8 +412,36 @@ function Submit(bp)
     local endLoc = buffer.Loc(endCol, endLine)
 
     local dir = fileDir(bp)
-    local rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " " .. engineCmd .. " < " .. shellEscape(tempPath)
+    local rawCmd = ""
+    if isWindows() then
+        -- Windows 下用 type 管道输入更稳定，并把 stderr 合并到 stdout，避免出现“未返回内容”但看不到错误
+        rawCmd = 'set "LLM_FILE_DIR=' .. dir .. '" && type ' .. cmdQuote(tempPath) .. ' | ' .. engineCmd .. ' 2>&1'
+    else
+        rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " " .. engineCmd .. " < " .. shellEscape(tempPath)
+    end
     local cmd = wrapWithUserShell(rawCmd)
+
+    if isWindows() then
+        -- Windows 下 JobStart 对带管道命令的 stdout 回调不稳定，改为同步执行确保拿到输出
+        local out, runErr = shell.RunCommand(cmd)
+        removeFile(tempPath)
+
+        local finalOut = out or ""
+        finalOut = finalOut:gsub("\r\n", "\n")
+        if runErr ~= nil and tostring(runErr) ~= "" then
+            if finalOut ~= "" then
+                finalOut = finalOut .. "\n"
+            end
+            finalOut = finalOut .. "@// " .. tostring(runErr)
+        end
+        if finalOut == "" then
+            finalOut = "@// llm_engine 未返回内容"
+        end
+
+        bp.Buf:Replace(startLoc, endLoc, finalOut .. "\nUser: ")
+        micro.InfoBar():Message("llm: 请求完成")
+        return
+    end
 
     state.interrupted = false
     state.stderrOutput = ""
@@ -382,22 +493,32 @@ function PreviewImage(bp)
     end
 
     local full = absImagePath(bp, p)
-    local checkCmd = "test -f " .. shellEscape(full) .. " && echo ok"
-    local out, _ = shell.RunCommand(checkCmd)
+    local checkCmd = ""
+    if isWindows() then
+        checkCmd = 'if exist ' .. cmdQuote(full) .. ' (echo ok)'
+    else
+        checkCmd = "test -f " .. shellEscape(full) .. " && echo ok"
+    end
+    local out, _ = runUserShellCommand(checkCmd)
     if out == nil or out:find("ok") == nil then
         micro.InfoBar():Error("llm: 图片不存在: " .. full)
         return
     end
 
-    local opener = "xdg-open " .. shellEscape(full) .. " >/dev/null 2>&1 &"
+    local opener = ""
+    if isWindows() then
+        opener = 'start "" ' .. cmdQuote(full)
+    else
+        opener = "xdg-open " .. shellEscape(full) .. " >/dev/null 2>&1 &"
+    end
     if shell.RunBackgroundShell ~= nil then
-        local _, err = shell.RunBackgroundShell(opener)
+        local _, err = shell.RunBackgroundShell(wrapWithUserShell(opener))
         if err ~= nil then
             micro.InfoBar():Error("llm: 打开图片失败: " .. tostring(err))
             return
         end
     else
-        local _, err = shell.RunCommand(opener)
+        local _, err = runUserShellCommand(opener)
         if err ~= nil then
             micro.InfoBar():Error("llm: 打开图片失败: " .. tostring(err))
             return

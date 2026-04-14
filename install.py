@@ -264,10 +264,26 @@ def _find_micro_dirs():
     home = os.path.expanduser('~')
 
     if system == 'Windows':
+        candidates = []
+
         appdata = os.environ.get('APPDATA', '')
         if appdata:
-            return [os.path.join(appdata, 'micro', 'plug')]
-        return [os.path.join(home, '.config', 'micro', 'plug')]
+            candidates.append(os.path.join(appdata, 'micro', 'plug'))
+
+        # 一些 Windows 发行/包装版 micro 会沿用 XDG 路径
+        candidates.append(os.path.join(home, '.config', 'micro', 'plug'))
+
+        # 兼容少数便携版/自定义路径习惯
+        candidates.append(os.path.join(home, 'micro', 'plug'))
+
+        # 去重，保持顺序
+        seen = set()
+        result = []
+        for p in candidates:
+            if p and p not in seen:
+                seen.add(p)
+                result.append(p)
+        return result
 
     return [os.path.join(home, '.config', 'micro', 'plug')]
 
