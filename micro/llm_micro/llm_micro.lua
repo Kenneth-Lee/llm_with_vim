@@ -5,25 +5,36 @@ local config = import("micro/config")
 local buffer = import("micro/buffer")
 local shell = import("micro/shell")
 local os = import("os")
+local runtime = import("runtime")
 
 local state = {
     currentJob = nil,
     interrupted = false,
     stderrOutput = "",
-    outlineMarks = {}
+    cachedEngineCmd = nil,
+    stdoutOutput = "",
+    streamEndLoc = nil
 }
 
 math.randomseed(os.Getpid())
-
-local function isWindows()
-    return package.config:sub(1, 1) == "\\"
-end
 
 local function trim(s)
     if s == nil then
         return ""
     end
     return tostring(s):gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+local function isWindows()
+    -- 插件以 module(..., package.seeall) 加载时，Lua 全局 package 常为 nil，不能用 package.config。
+    -- 使用 Go runtime.GOOS（micro 暴露）与可执行文件目标系统一致。
+    if runtime ~= nil and runtime.GOOS ~= nil and runtime.GOOS ~= "" then
+        return runtime.GOOS == "windows"
+    end
+    if trim(os.Getenv("WINDIR")) ~= "" or trim(os.Getenv("SYSTEMROOT")) ~= "" then
+        return true
+    end
+    return trim(os.Getenv("OS")):lower() == "windows_nt"
 end
 
 local function isLLMBuffer(bp)
@@ -51,18 +62,6 @@ local function fileDir(bp)
         return "."
     end
     return path:sub(1, slashPos - 1)
-end
-
-local function lineCount(buf)
-    local n = 0
-    while true do
-        local line = buf:Line(n)
-        if line == nil then
-            break
-        end
-        n = n + 1
-    end
-    return n
 end
 
 local function writeTempInput(content)
@@ -115,69 +114,89 @@ local function wrapWithUserShell(cmd)
         local sh = userShellPath()
         return cmdQuote(sh) .. " /d /s /c " .. cmdQuote(cmd)
     end
-    local sh = userShellPath()
-    return shellEscape(sh) .. " -lc " .. shellEscape(cmd)
+    -- micro 在 Linux/macOS 上的 JobStart 本身已通过 sh -c 执行命令；
+    -- 这里不再额外套用户 shell，避免每次请求触发 shell 启动/初始化开销。
+    return cmd
 end
 
 local function runUserShellCommand(cmd)
-    return shell.RunCommand(wrapWithUserShell(cmd))
+    if isWindows() then
+        return shell.RunCommand(wrapWithUserShell(cmd))
+    end
+    -- 非 Windows 下显式使用 /bin/sh，避免使用用户 shell（如 zsh -lc）造成明显延迟。
+    return shell.RunCommand("sh -c " .. shellEscape(cmd))
 end
 
 local function findEngine()
+    if type(state.cachedEngineCmd) == "string" and state.cachedEngineCmd ~= "" then
+        return state.cachedEngineCmd
+    end
+
     local configured1 = config.GetGlobalOption("llm_micro.enginecmd")
     if type(configured1) == "string" and trim(configured1) ~= "" then
-        return trim(configured1)
+        state.cachedEngineCmd = trim(configured1)
+        return state.cachedEngineCmd
     end
 
     local configured2 = config.GetGlobalOption("plugin.llm_micro.enginecmd")
     if type(configured2) == "string" and trim(configured2) ~= "" then
-        return trim(configured2)
+        state.cachedEngineCmd = trim(configured2)
+        return state.cachedEngineCmd
     end
 
     local envConfigured = trim(os.Getenv("LLM_ENGINE_CMD"))
     if envConfigured ~= "" then
-        return envConfigured
+        state.cachedEngineCmd = envConfigured
+        return state.cachedEngineCmd
     end
 
     if isWindows() then
         local out1, err1 = runUserShellCommand("where llm_engine >nul 2>&1 && echo llm_engine")
         if err1 == nil and out1 ~= nil and out1:find("llm_engine") ~= nil then
-            return "llm_engine"
+            state.cachedEngineCmd = "llm_engine"
+            return state.cachedEngineCmd
         end
 
         local out2, err2 = runUserShellCommand("where llm-engine >nul 2>&1 && echo llm-engine")
         if err2 == nil and out2 ~= nil and out2:find("llm-engine") ~= nil then
-            return "llm-engine"
+            state.cachedEngineCmd = "llm-engine"
+            return state.cachedEngineCmd
         end
 
         local out3, err3 = runUserShellCommand("where py >nul 2>&1 && py -3 -m llm_engine --help >nul 2>&1 && echo ok")
         if err3 == nil and out3 ~= nil and out3:find("ok") ~= nil then
-            return "py -3 -m llm_engine"
+            state.cachedEngineCmd = "py -3 -m llm_engine"
+            return state.cachedEngineCmd
         end
 
         local out4, err4 = runUserShellCommand("where python >nul 2>&1 && python -m llm_engine --help >nul 2>&1 && echo ok")
         if err4 == nil and out4 ~= nil and out4:find("ok") ~= nil then
-            return "python -m llm_engine"
+            state.cachedEngineCmd = "python -m llm_engine"
+            return state.cachedEngineCmd
         end
     else
         local out1, err1 = runUserShellCommand("command -v llm_engine >/dev/null 2>&1 && echo llm_engine")
         if err1 == nil and out1 ~= nil and out1:find("llm_engine") ~= nil then
-            return "llm_engine"
+            state.cachedEngineCmd = "llm_engine"
+            return state.cachedEngineCmd
         end
 
         local out2, err2 = runUserShellCommand("command -v llm-engine >/dev/null 2>&1 && echo llm-engine")
         if err2 == nil and out2 ~= nil and out2:find("llm-engine") ~= nil then
-            return "llm-engine"
+            state.cachedEngineCmd = "llm-engine"
+            return state.cachedEngineCmd
         end
 
         local out3, err3 = runUserShellCommand("command -v python3 >/dev/null 2>&1 && python3 -m llm_engine --help >/dev/null 2>&1 && echo ok")
         if err3 == nil and out3 ~= nil and out3:find("ok") ~= nil then
-            return "python3 -m llm_engine"
+            state.cachedEngineCmd = "python3 -m llm_engine"
+            return state.cachedEngineCmd
         end
 
         local out4, err4 = runUserShellCommand("command -v python >/dev/null 2>&1 && python -m llm_engine --help >/dev/null 2>&1 && echo ok")
         if err4 == nil and out4 ~= nil and out4:find("ok") ~= nil then
-            return "python -m llm_engine"
+            state.cachedEngineCmd = "python -m llm_engine"
+            return state.cachedEngineCmd
         end
     end
 
@@ -214,7 +233,8 @@ local function findEngine()
             out, err = runUserShellCommand("test -x " .. shellEscape(c) .. " && echo ok")
         end
         if err == nil and out ~= nil and out:find("ok") ~= nil then
-            return c
+            state.cachedEngineCmd = c
+            return state.cachedEngineCmd
         end
     end
 
@@ -283,31 +303,6 @@ local function collectContextToCursor(bp)
     return table.concat(lines, "\n") .. "\n"
 end
 
-local function buildOutline(bp)
-    state.outlineMarks = {}
-    local total = lineCount(bp.Buf)
-    local lines = {}
-
-    local i
-    for i = 0, total - 1 do
-        local line = bp.Buf:Line(i) or ""
-        if line:match("^User: ") or line:match("^Configure: ") then
-            table.insert(state.outlineMarks, i)
-            local item = string.format("%d. L%d %s", #state.outlineMarks, i + 1, line)
-            table.insert(lines, item)
-        end
-    end
-
-    if #lines == 0 then
-        micro.InfoBar():Message("llm: 当前文件没有 User/Configure 节点")
-        return
-    end
-
-    table.insert(lines, "")
-    table.insert(lines, "运行命令: > llmjump <编号> 进行跳转")
-    micro.TermMessage(table.concat(lines, "\n"))
-end
-
 local function findImagePath(line)
     return line:match("%$%$([^$]+)%$%$")
 end
@@ -337,6 +332,43 @@ local function normalizeExitArgs(args)
     return args[1], args[2], args[3], args[4]
 end
 
+local function endLocForText(text)
+    local s = text or ""
+    local line = 0
+    local col = 0
+    local i
+    for i = 1, #s do
+        local ch = s:sub(i, i)
+        if ch == "\n" then
+            line = line + 1
+            col = 0
+        else
+            col = col + 1
+        end
+    end
+    return buffer.Loc(col, line)
+end
+
+local function onLLMStdout(out, args)
+    local bp, startLoc = normalizeExitArgs(args)
+    if bp == nil or startLoc == nil then
+        return
+    end
+    if out == nil or out == "" then
+        return
+    end
+
+    local chunk = tostring(out):gsub("\r\n", "\n")
+    state.stdoutOutput = state.stdoutOutput .. chunk
+
+    local replaceEnd = state.streamEndLoc
+    if replaceEnd == nil then
+        replaceEnd = buffer.Loc(0, 0)
+    end
+    bp.Buf:Replace(startLoc, replaceEnd, state.stdoutOutput)
+    state.streamEndLoc = endLocForText(state.stdoutOutput)
+end
+
 local function onLLMExit(output, args)
     local bp, startLoc, endLoc, tempPath = normalizeExitArgs(args)
 
@@ -350,8 +382,11 @@ local function onLLMExit(output, args)
 
     removeFile(tempPath)
 
-    local out = output or ""
-    out = out:gsub("\r\n", "\n")
+    local out = state.stdoutOutput
+    if out == nil or out == "" then
+        out = output or ""
+        out = out:gsub("\r\n", "\n")
+    end
 
     if state.interrupted then
         out = out .. "\n<<===中断操作===>>"
@@ -364,11 +399,17 @@ local function onLLMExit(output, args)
     end
 
     local replaced = out .. "\nUser: "
-    bp.Buf:Replace(startLoc, endLoc, replaced)
+    local replaceEnd = state.streamEndLoc
+    if replaceEnd == nil then
+        replaceEnd = endLoc
+    end
+    bp.Buf:Replace(startLoc, replaceEnd, replaced)
 
     state.currentJob = nil
     state.interrupted = false
     state.stderrOutput = ""
+    state.stdoutOutput = ""
+    state.streamEndLoc = nil
     micro.InfoBar():Message("llm: 请求完成")
 end
 
@@ -417,7 +458,8 @@ function Submit(bp)
         -- Windows 下用 type 管道输入更稳定，并把 stderr 合并到 stdout，避免出现“未返回内容”但看不到错误
         rawCmd = 'set "LLM_FILE_DIR=' .. dir .. '" && type ' .. cmdQuote(tempPath) .. ' | ' .. engineCmd .. ' 2>&1'
     else
-        rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " " .. engineCmd .. " < " .. shellEscape(tempPath)
+        -- 用 exec 替换外层 sh，确保 Ctrl-K 的 JobStop 能直接终止 llm_engine。
+        rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " exec " .. engineCmd .. " < " .. shellEscape(tempPath)
     end
     local cmd = wrapWithUserShell(rawCmd)
 
@@ -445,7 +487,9 @@ function Submit(bp)
 
     state.interrupted = false
     state.stderrOutput = ""
-    state.currentJob = shell.JobStart(cmd, nil, onLLMStderr, onLLMExit, bp, startLoc, endLoc, tempPath)
+    state.stdoutOutput = ""
+    state.streamEndLoc = endLoc
+    state.currentJob = shell.JobStart(cmd, onLLMStdout, onLLMStderr, onLLMExit, bp, startLoc, endLoc, tempPath)
     micro.InfoBar():Message("llm: 已提交，请求进行中... (Ctrl+K / Alt+K 中断)")
 end
 
@@ -457,31 +501,6 @@ function Stop(bp)
     state.interrupted = true
     shell.JobStop(state.currentJob)
     micro.InfoBar():Message("llm: 已发送中断")
-end
-
-function Outline(bp)
-    if not isLLMBuffer(bp) then
-        micro.InfoBar():Error("llm: 仅在 .llm 文件中可用")
-        return
-    end
-    buildOutline(bp)
-end
-
-function Jump(bp, args)
-    if #args < 1 then
-        micro.InfoBar():Message("用法: llmjump <编号>")
-        return
-    end
-
-    local idx = tonumber(args[1])
-    if idx == nil or idx < 1 or idx > #state.outlineMarks then
-        micro.InfoBar():Error("llm: 无效编号，请先运行 llmoutline")
-        return
-    end
-
-    local target = state.outlineMarks[idx]
-    bp.Cursor:Goto(buffer.Loc(0, target))
-    micro.InfoBar():Message(string.format("llm: 已跳转到第 %d 项 (L%d)", idx, target + 1))
 end
 
 function PreviewImage(bp)
@@ -534,15 +553,12 @@ function init()
 
     config.MakeCommand("llmsubmit", Submit, config.NoComplete)
     config.MakeCommand("llmstop", Stop, config.NoComplete)
-    config.MakeCommand("llmoutline", Outline, config.NoComplete)
-    config.MakeCommand("llmjump", Jump, config.NoComplete)
     config.MakeCommand("llmimg", PreviewImage, config.NoComplete)
     config.MakeCommand("llmdoctor", Doctor, config.NoComplete)
 
     config.TryBindKey("F1", "lua:llm_micro.Submit", true)
     config.TryBindKey("Ctrl-k", "lua:llm_micro.Stop", true)
     config.TryBindKey("Alt-k", "lua:llm_micro.Stop", true)
-    config.TryBindKey("F2", "lua:llm_micro.Outline", true)
     config.TryBindKey("F3", "lua:llm_micro.PreviewImage", true)
 
     config.AddRuntimeFile("llm_micro", config.RTHelp, "help/llm-micro.md")

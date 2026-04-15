@@ -258,25 +258,37 @@ def install_vscode():
 
 # ==================== micro 插件安装 ====================
 
+def _micro_config_dir():
+    """与 micro 的 internal/config.InitConfigDir 一致（不含 -config-dir）。"""
+    micro_home = (os.environ.get('MICRO_CONFIG_HOME') or '').strip()
+    if micro_home:
+        return os.path.abspath(os.path.expanduser(micro_home))
+    xdg_home = (os.environ.get('XDG_CONFIG_HOME') or '').strip()
+    if not xdg_home:
+        xdg_home = os.path.join(os.path.expanduser('~'), '.config')
+    else:
+        xdg_home = os.path.abspath(os.path.expanduser(xdg_home))
+    return os.path.join(xdg_home, 'micro')
+
+
 def _find_micro_dirs():
-    """返回 micro 插件目录候选列表"""
+    """返回 micro 插件目录候选列表（与 micro 实际配置目录对齐，并保留常见兼容路径）"""
     system = platform.system()
     home = os.path.expanduser('~')
 
     if system == 'Windows':
         candidates = []
 
+        # micro 默认与 Linux 相同：MICRO_CONFIG_HOME / XDG_CONFIG_HOME/micro / ~/.config/micro
+        candidates.append(os.path.join(_micro_config_dir(), 'plug'))
+
         appdata = os.environ.get('APPDATA', '')
         if appdata:
             candidates.append(os.path.join(appdata, 'micro', 'plug'))
 
-        # 一些 Windows 发行/包装版 micro 会沿用 XDG 路径
         candidates.append(os.path.join(home, '.config', 'micro', 'plug'))
-
-        # 兼容少数便携版/自定义路径习惯
         candidates.append(os.path.join(home, 'micro', 'plug'))
 
-        # 去重，保持顺序
         seen = set()
         result = []
         for p in candidates:
@@ -285,7 +297,7 @@ def _find_micro_dirs():
                 result.append(p)
         return result
 
-    return [os.path.join(home, '.config', 'micro', 'plug')]
+    return [os.path.join(_micro_config_dir(), 'plug')]
 
 
 def install_micro():
