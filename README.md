@@ -246,3 +246,14 @@ llm_engine.json进行全局配置，这些配置分三层：
 * 对于任何兼容 OpenAI API 格式的服务（如 [vLLM](https://github.com/vllm-project/vllm)），
   可以使用任意引擎名称，参考配置：Configure: {'engine_type': 'vllm',
   'server_addr': 'localhost:8000', 'model': 'Qwen/Qwen2.5-7B-Instruct'}
+
+## 已知问题
+
+* micro在Windows下不支持异步模式，需要提交请求后只能等待全部回答返回后才能看到
+  显示。
+
+* 当前考虑上下文的时候没有考虑思维链的情形，这会导致每次回答都忽略思考的上下文，
+  用本工具和有思维链交流，效果会和支持思维链的工具的效果不同。
+
+* 部分LLM服务平台可能会拒绝非通用AI引擎发的请求，所以通过本应用发送请求，有可能
+  被这些平台拒绝。
