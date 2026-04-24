@@ -501,7 +501,77 @@ def _get_user_config_item(name, default, user_config):
         return c
     return c
 
-def _stream_response(resp, engine_type):
+
+def _parse_reasoning_delta(delta):
+    """从流式 delta 中提取 reasoning/thinking 文本。"""
+    if not isinstance(delta, dict):
+        return ''
+
+    candidates = [
+        delta.get('reasoning_content'),
+        delta.get('thinking'),
+        delta.get('reasoning'),
+        delta.get('think'),
+    ]
+
+    parts = []
+    for item in candidates:
+        if not item:
+            continue
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            for key in ('content', 'text', 'reasoning_content'):
+                value = item.get(key)
+                if isinstance(value, str) and value:
+                    parts.append(value)
+        elif isinstance(item, list):
+            for node in item:
+                if isinstance(node, str) and node:
+                    parts.append(node)
+                elif isinstance(node, dict):
+                    for key in ('content', 'text'):
+                        value = node.get(key)
+                        if isinstance(value, str) and value:
+                            parts.append(value)
+
+    return ''.join(parts)
+
+
+def _emit_thinking_stream(state, chunk, final=False):
+    """按流式 chunk 输出 thinking，尽量按行合并零碎片段。"""
+    if not state:
+        return
+
+    if chunk:
+        state['buffer'] += chunk
+
+    buffer = state['buffer']
+    while True:
+        newline_pos = buffer.find('\n')
+        if newline_pos < 0:
+            break
+        line = buffer[:newline_pos]
+        if not state['started']:
+            print('', flush=True)
+            state['started'] = True
+        if line:
+            print(f"@// [Think] {line}", flush=True)
+        else:
+            print("@// [Think]", flush=True)
+        buffer = buffer[newline_pos + 1:]
+
+    state['buffer'] = buffer
+
+    if final and state['buffer']:
+        if not state['started']:
+            print('', flush=True)
+            state['started'] = True
+        print(f"@// [Think] {state['buffer']}", flush=True)
+        state['buffer'] = ''
+
+
+def _stream_response(resp, engine_type, thinking_mode=False):
     """
     流式解析响应，实时输出文本内容，同时收集工具调用信息。
     返回 (content_text, tool_calls_list)。
@@ -511,6 +581,7 @@ def _stream_response(resp, engine_type):
     content_parts = []
     # 累积工具调用: index -> {'id', 'type', 'function': {'name', 'arguments'}}
     tool_calls_acc = {}
+    thinking_state = {'buffer': '', 'started': False} if thinking_mode else None
 
     if engine_type == 'ollama':
         for line in resp.iter_lines():
@@ -523,6 +594,9 @@ def _stream_response(resp, engine_type):
                 if c:
                     print(c, end='', flush=True)
                     content_parts.append(c)
+                reasoning = _parse_reasoning_delta(message)
+                if reasoning:
+                    _emit_thinking_stream(thinking_state, reasoning)
                 # Ollama 的 tool_calls 出现在最终消息中
                 for i, tc in enumerate(message.get('tool_calls', [])):
                     args = tc.get('function', {}).get('arguments', {})
@@ -555,10 +629,14 @@ def _stream_response(resp, engine_type):
                 try:
                     data = json.loads(line.decode('utf-8'))
                     if 'choices' in data and data['choices']:
-                        c = data['choices'][0].get('message', {}).get('content', '')
+                        message = data['choices'][0].get('message', {})
+                        c = message.get('content', '')
                         if c:
                             print(c, end='', flush=True)
                             content_parts.append(c)
+                        reasoning = _parse_reasoning_delta(message)
+                        if reasoning:
+                            _emit_thinking_stream(thinking_state, reasoning)
                 except (json.JSONDecodeError, UnicodeDecodeError):
                     continue
 
@@ -587,6 +665,10 @@ def _stream_response(resp, engine_type):
                     print(c, end='', flush=True)
                     content_parts.append(c)
 
+                reasoning = _parse_reasoning_delta(delta)
+                if reasoning:
+                    _emit_thinking_stream(thinking_state, reasoning)
+
                 # 工具调用（流式累积：name 和 arguments 分多个 chunk 到达）
                 for tc_delta in delta.get('tool_calls', []):
                     idx = tc_delta.get('index', 0)
@@ -606,6 +688,8 @@ def _stream_response(resp, engine_type):
 
             except (json.JSONDecodeError, UnicodeDecodeError):
                 continue
+
+    _emit_thinking_stream(thinking_state, '', final=True)
 
     full_content = ''.join(content_parts)
     tool_calls = [tool_calls_acc[i] for i in sorted(tool_calls_acc.keys())]
@@ -634,6 +718,10 @@ def answer():
     server_addr = _get_user_config_item("server_addr", "localhost", user_config)
     for key in common_config.keys():
         common_config[key] = _get_user_config_item(key, common_config[key], user_config)
+    thinking_mode = _get_user_config_item("thinking", False, user_config)
+    # 兼容用户误写为 Thinking
+    if not thinking_mode and user_config and 'thinking' not in user_config and 'Thinking' in user_config:
+        thinking_mode = bool(user_config.get('Thinking'))
     if engine_type == "ollama":
         keep_alive = _get_user_config_item("keep_alive", 60, user_config)
 
@@ -735,10 +823,18 @@ def answer():
 
     # 根据配置完善请求记录（只导入 API 认可的请求参数）
     _internal_keys = {'connect_timeout', 'read_timeout', 'verbose',
-                       'tools', 'max_tool_rounds'}
+                       'tools', 'max_tool_rounds', 'thinking'}
     for key in common_config.keys():
         if key not in _internal_keys:
             history[key] = common_config[key]
+
+    if thinking_mode:
+        # 各引擎并未完全统一；同时设置常见字段，服务端可按需忽略未知项
+        history['thinking'] = True
+        history['think'] = True
+        if engine_type != 'ollama':
+            history['reasoning'] = {'enabled': True}
+
     if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
     if engine_type != 'llama':
@@ -887,7 +983,7 @@ def answer():
                     _active_response = resp
             resp.raise_for_status()
 
-            content, tool_calls = _stream_response(resp, engine_type)
+            content, tool_calls = _stream_response(resp, engine_type, thinking_mode)
 
             if not tool_calls or not tool_defs:
                 break

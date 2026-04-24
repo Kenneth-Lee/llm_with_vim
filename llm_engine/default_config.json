@@ -32,7 +32,7 @@
 		"assistant": "Assistant: ",
 		"config": "Configure: "
 	},
-	
+
 	"request_template": {
         	"max_tokens":   1024,
 		"temperature":  1.2
@@ -48,7 +48,8 @@
                 "model": "default",
                 "connect_timeout": 30,
                 "read_timeout": 1800,
-                "verbose": false
+			"verbose": false,
+			"thinking": false
         },
 
 	"default-config-comment": {
@@ -56,6 +57,7 @@
                 "connect_timeout": "连接超时时间（秒）",
                 "read_timeout": "读取超时时间（秒），ollama首次加载模型可能需要较长时间",
                 "verbose": "是否输出详细调试信息（true/false），用于定位请求问题",
+				  "thinking": "是否开启Thinking模式。开启后会请求模型返回思考内容，并以@// [Think]注释显示（不会回传到下一轮上下文）",
                 "tools": "启用的工具列表，可选: read, write, edit, bash, search, list_dir, python, web_fetch, view_image",
                 "max_tool_rounds": "工具调用最大轮数，默认10"
          }
