@@ -234,6 +234,15 @@ function! DoGen(...)
 		\ 'env': {'LLM_FILE_DIR': l:file_dir},
 	\ })
 
+	" 检查job_start是否成功，失败则恢复modifiable
+	if s:gen_job == v:null || job_status(s:gen_job) != 'run'
+		" job启动失败，手动恢复状态
+		setlocal modifiable
+		call append(0, '<<===启动LLM引擎失败===>>')
+		let s:gen_job = v:null
+		return
+	endif
+
 	" 设置状态栏并启动定时器
 	let &laststatus = 2
 	let &statusline = '请求LLM...'
