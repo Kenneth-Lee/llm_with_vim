@@ -337,14 +337,13 @@ function! s:SetupLLMBuffer()
 	nmap <buffer> <F3> :call PreviewImage()<CR>
 	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
 
-	ab <buffer> WAns Write a new scene:
-	ab <buffer> ITns In the next scene,
 	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': 'localhost', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600, 'tools' : ['read', 'web_search']}
 	ab <buffer> configAli Configure: {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configHj Configure:  {'engine_type': 'haijing', 'auth': 'Basic xxxxxxxxxxxxxxxxxxxxxxxxxxx'}
 	ab <buffer> configZp Configure:  {'engine_type': 'zhipu', 'auth': 'Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx', 'max_tokens': 10240, 'temperature': 1}
 	" 图片引用示例缩写
-	ab <buffer> imgpath $$path/to/image.png$$
+	ab <buffer> imgPath $$path/to/image.png$$
+	ab <buffer> allTools 'tools': ['read', 'write', 'edit', 'bash', 'search', 'list_dir', 'python', 'web_fetch']
 	setlocal spell
 	setlocal complete+=kspell
 endfunction

@@ -46,9 +46,6 @@
 
         "default_config": {
                 "model": "default",
-                "max_tokens": 1024,
-                "temperature": 1,
-                "repeat_penalty": 1.2,
                 "connect_timeout": 30,
                 "read_timeout": 1800,
                 "verbose": false
