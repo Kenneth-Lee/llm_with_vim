@@ -77,6 +77,29 @@ function! s:BufSetLine(buf, lnum, text)
 	call setbufvar(a:buf, '&modifiable', 0)
 endfunction
 
+function! s:RestoreMode(resume_insert)
+	if !&modifiable
+		return
+	endif
+	if a:resume_insert
+		if mode() =~# '^i'
+			return
+		endif
+		startinsert!
+		return
+	endif
+	if mode() =~# '^i' || mode() =~# '^R'
+		stopinsert
+	endif
+endfunction
+
+function! s:StabilizeCursor(buf)
+	if bufnr('%') != a:buf
+		return
+	endif
+	call cursor(line('.'), col('.'))
+endfunction
+
 " 输出回调（每次一行，写入目标buffer而非当前buffer）
 function! s:HandleGenOutput(channel, msg)
 	let s = s:gen_state
@@ -124,11 +147,9 @@ function! s:HandleGenExit(job, status)
 		else
 			call appendbufline(s.target_buf, s.line_no, 'User: ')
 		endif
-		if bufnr('%') == s.target_buf
-			call cursor(s.line_no + 1, 1)
-			if get(s, 'resume_insert', 0)
-				startinsert!
-			endif
+		call s:StabilizeCursor(s.target_buf)
+		if !s.int_by_key && !s.interrupted
+			call s:RestoreMode(get(s, 'resume_insert', 0))
 		endif
 	endif
 	let s:gen_job = v:null
@@ -180,8 +201,9 @@ function! DoGen(...)
 	call setbufline(l:temp_buf, 1, split(content, "\n"))
 
 	" 清除用于输入的内容
-	execute '1,.d'
-	normal O
+	silent keepjumps 1,.delete _
+	call append(0, '')
+	call cursor(1, 1)
 
 	" 生成期间设为只读，防止用户编辑导致行号错位
 	setlocal nomodifiable
