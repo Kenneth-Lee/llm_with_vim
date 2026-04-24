@@ -126,6 +126,9 @@ function! s:HandleGenExit(job, status)
 		endif
 		if bufnr('%') == s.target_buf
 			call cursor(s.line_no + 1, 1)
+			if get(s, 'resume_insert', 0)
+				startinsert!
+			endif
 		endif
 	endif
 	let s:gen_job = v:null
@@ -139,8 +142,13 @@ function! s:GenTimerCb(timer_id)
 	redraw
 endfunction
 
+function! s:DoGenFromInsert()
+	call DoGen(1)
+endfunction
+
 " 把[1,当前行]发入llm_engine获取输出（非阻塞，用户可浏览文件）
-function! DoGen()
+function! DoGen(...)
+	let l:resume_insert = a:0 > 0 ? a:1 : 0
 	" 防止并发请求
 	if s:gen_job != v:null && job_status(s:gen_job) == 'run'
 		echohl WarningMsg
@@ -185,6 +193,7 @@ function! DoGen()
 		\ 'line_no': 0,
 		\ 'interrupted': 0,
 		\ 'int_by_key': 0,
+		\ 'resume_insert': l:resume_insert,
 		\ 'old_lst': &laststatus,
 		\ 'start_sec': localtime(),
 	\ }
@@ -229,16 +238,16 @@ function! PreviewImage()
 		echohl None
 		return
 	endif
-	
+
 	" 提取图片路径
 	let img_path = substitute(match, '\$\$\(.*\)\$\$', '\1', '')
-	
+
 	" 处理路径：如果是相对路径，基于当前文件目录
 	if img_path[0] !=# '/' && img_path[1:2] !=# ':\\'
 		let base_dir = expand('%:p:h')
 		let img_path = base_dir . '/' . img_path
 	endif
-	
+
 	" 检查文件是否存在
 	if !filereadable(img_path)
 		echohl ErrorMsg
@@ -246,7 +255,7 @@ function! PreviewImage()
 		echohl None
 		return
 	endif
-	
+
 	" 尝试用系统命令打开图片
 	if has('mac')
 		call system('open ' . shellescape(img_path))
@@ -258,7 +267,7 @@ function! PreviewImage()
 		let &statusline = '图片路径: ' . img_path
 		return
 	endif
-	
+
 	let &statusline = '正在打开图片: ' . img_path
 endfunction
 
@@ -335,7 +344,12 @@ function! s:SetupLLMBuffer()
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
 	" F3: 预览图片（光标在$$...$$位置）
 	nmap <buffer> <F3> :call PreviewImage()<CR>
-	imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
+	if &insertmode
+		inoremap <buffer> <F1> <C-G>u<ESC>:call <SID>DoGenFromInsert()<CR>
+		inoremap <buffer> jj <C-G>u<ESC>:call <SID>DoGenFromInsert()<CR>
+	else
+		imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
+	endif
 
 	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': 'localhost', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600, 'tools' : ['read', 'web_search']}
 	ab <buffer> configAli Configure: {'engine_type': 'ali', 'auth': 'sk-xxxxxxxxxxxxxxxxxxxxx'}
