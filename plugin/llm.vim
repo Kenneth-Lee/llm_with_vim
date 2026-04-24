@@ -224,6 +224,12 @@ function! DoGen(...)
 	let l:file_dir = expand('%:p:h')
 	let l:cmd = s:env_status.engine
 
+	" 获取文件编码：优先使用 fileencoding，否则使用 encoding
+	let l:file_encoding = &fileencoding
+	if empty(l:file_encoding)
+		let l:file_encoding = &encoding
+	endif
+
 	" 异步请求LLM（exit_cb在进程退出后清理）
 	let s:gen_job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
@@ -231,7 +237,7 @@ function! DoGen(...)
 		\ 'out_cb': function('s:HandleGenOutput'),
 		\ 'err_cb': function('s:HandleGenErr'),
 		\ 'exit_cb': function('s:HandleGenExit'),
-		\ 'env': {'LLM_FILE_DIR': l:file_dir},
+		\ 'env': {'LLM_FILE_DIR': l:file_dir, 'LLM_FILE_ENCODING': l:file_encoding},
 	\ })
 
 	" 检查job_start是否成功，失败则恢复modifiable
