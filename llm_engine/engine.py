@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-LLM Engine - 处理.llm文件并发送给LLM服务
+LLM Engine - 处理.llm文件上下文并发送给LLM服务
 """
 
 from __future__ import print_function
@@ -60,6 +60,12 @@ _roles = {
     "config":    "Configure: ",
 }
 
+# 常用前缀
+_prefixes = {
+    "comm":     "@##",
+    "tmp_comm": "@//",
+    "inc":      "@@inc ",
+}
 
 def _detect_role_line(line):
     """检测角色前缀，兼容全角冒号和冒号后无空格写法。"""
@@ -133,14 +139,20 @@ def _make_ollama_api(host, api='chat'):
     else:
         return 'http://' + host + ':11434/api/' + api
 
-def debug(msg):
+def debug(msg, noend=False):
     """输出调试信息到stdout（作为注释）"""
-    print(f"@// {msg}", flush=True)
+    if (noend):
+        print(f"@// {msg}", end='')
+    else:
+        print(f"@// {msg}", flush=True)
+
+def think(msg):
+    debug(f"[think] {msg}");
 
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
     if _verbose_mode:
-        print(f"@// {msg}", flush=True)
+        debug(msg)
 
 def _encode_image(image_path, base_dir=''):
     """读取图片并转为 base64"""
@@ -325,16 +337,16 @@ def _parse_input():
         stack[-1] = (current_lines, line_idx + 1, base_dir, depth, is_main_file)
 
         # 处理不同类型的行
-        if line.startswith("@//"):              # 临时注释/调试信息，忽略
+        if line.startswith(_prefixes['tmp_comm']):          # 临时注释/调试信息，忽略
             continue
 
-        elif line.startswith("@##"):             # 长久注释
+        elif line.startswith(_prefixes['comm']):             # 长久注释
             flush_role()
             if is_main_file:
                 output_lines.append(line)
             current_role = 'none'
 
-        elif line.startswith("@@inc "):          # @@inc 原语
+        elif line.startswith(_prefixes['inc']):             # 头文件原语
             flush_role()
             if is_main_file:
                 output_lines.append(line)
@@ -342,27 +354,27 @@ def _parse_input():
 
             # 检查深度限制
             if depth >= MAX_DEPTH:
-                debug(f"@@inc: maximum nesting depth ({MAX_DEPTH}) exceeded")
+                debug(f"{_prefixes['inc']}: maximum nesting depth ({MAX_DEPTH}) exceeded")
                 continue
 
             # 解析文件名
             parts = line.strip().split(None, 1)
             if len(parts) < 2:
-                debug(f"Invalid @@inc directive: {line.strip()}")
+                debug(f"{_prefixes['inc']}: Invalid directive: {line.strip()}")
                 continue
 
             filename = parts[1].strip()
 
             # 验证文件名
             if os.path.isabs(filename) or '..' in filename:
-                debug(f"@@inc: invalid path: {filename}")
+                debug(f"{_prefixes['inc']}: invalid path: {filename}")
                 continue
 
             # 构建完整路径
             file_path = os.path.join(base_dir, filename) if base_dir else filename
             file_path = os.path.normpath(file_path)
             if '..' in file_path:
-                debug(f"@@inc: path traversal not allowed: {filename}")
+                debug(f"{_prefixes['inc']}: path traversal not allowed: {filename}")
                 continue
 
             # 读取被包含的文件
@@ -370,7 +382,7 @@ def _parse_input():
                 with open(file_path, 'r', encoding='utf-8') as f:
                     content = f.read()
             except (FileNotFoundError, IOError, UnicodeDecodeError) as e:
-                debug(f"@@inc: error reading {filename}: {e}")
+                debug(f"{_prefixes['inc']}: error reading {filename}: {e}")
                 continue
 
             # 获取被包含文件的目录
@@ -461,7 +473,6 @@ def _parse_input():
                 debug("Hint: Configure 区块中混入了角色行。请确认角色前缀格式正确，并确保 Configure 只包含字典内容。")
             else:
                 debug("Configuration must be in JSON format like {\"key\": \"value\"} or Python dict format like {'key': 'value'}")
-            return history, None
 
     return history, None
 
@@ -553,12 +564,12 @@ def _emit_thinking_stream(state, chunk, final=False):
             break
         line = buffer[:newline_pos]
         if not state['started']:
-            print('', flush=True)
+            debug('')
             state['started'] = True
         if line:
-            print(f"@// [Think] {line}", flush=True)
+            think(f"{line}")
         else:
-            print("@// [Think]", flush=True)
+            think("")
         buffer = buffer[newline_pos + 1:]
 
     state['buffer'] = buffer
@@ -567,7 +578,7 @@ def _emit_thinking_stream(state, chunk, final=False):
         if not state['started']:
             print('', flush=True)
             state['started'] = True
-        print(f"@// [Think] {state['buffer']}", flush=True)
+        think(f"{state['buffer']}")
         state['buffer'] = ''
 
 
@@ -719,9 +730,6 @@ def answer():
     for key in common_config.keys():
         common_config[key] = _get_user_config_item(key, common_config[key], user_config)
     thinking_mode = _get_user_config_item("thinking", False, user_config)
-    # 兼容用户误写为 Thinking
-    if not thinking_mode and user_config and 'thinking' not in user_config and 'Thinking' in user_config:
-        thinking_mode = bool(user_config.get('Thinking'))
     if engine_type == "ollama":
         keep_alive = _get_user_config_item("keep_alive", 60, user_config)
 
@@ -1077,26 +1085,16 @@ def answer():
 
         response_completed = True
         print()
-    except requests.exceptions.Timeout:
-        print()
-        if not response_completed:
-            debug("API request timed out.")
-    except requests.exceptions.ConnectionError:
-        print()
-        if not response_completed:
-            debug("Connection error occurred.")
     except requests.exceptions.HTTPError as e:
-        print()
-        debug(f"HTTP error occurred: {e}")
+        debug(f"{os.linesep}HTTP error occurred: {e}")
         if hasattr(e, 'response') and e.response is not None:
             try:
                 debug(f"Response body: {e.response.text[:500]}")
             except Exception:
                 pass
     except Exception as e:
-        print()
-        debug(f"Unexpected error occurred: {e}")
+        debug(f"{os.linesep} request fail: {e}")
     finally:
         _active_response = None
 
-    print(f"@//updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", end='')
+    debug(f"updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", noend=True)

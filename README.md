@@ -140,6 +140,7 @@ User: 请读取 /etc/hostname 并告诉我这台机器的名称
 | list\_dir | 列出目录内容 |
 | python | 执行 Python 代码片段 |
 | web\_fetch | 获取网页文本内容 |
+| view\_image | 查看图片 |
 
 工具定义存放在 `llm_engine/tool_definitions.json` 中。通过`max_tool_rounds`（默
 认10）可以控制单次对话中工具调用的最大轮数。

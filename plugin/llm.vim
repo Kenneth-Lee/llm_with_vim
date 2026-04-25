@@ -405,7 +405,7 @@ function! s:SetupLLMBuffer()
 	ab <buffer> configZp Configure:  {'engine_type': 'zhipu', 'auth': 'Bearer xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.xxxxxxxxxxxxxxxx', 'max_tokens': 10240, 'temperature': 1}
 	" 图片引用示例缩写
 	ab <buffer> imgPath $$path/to/image.png$$
-	ab <buffer> allTools 'tools': ['read', 'write', 'edit', 'bash', 'search', 'list_dir', 'python', 'web_fetch']
+	ab <buffer> allTools 'tools': ['read', 'write', 'edit', 'bash', 'search', 'list_dir', 'python', 'web_fetch', 'view_image']
 	setlocal spell
 	setlocal complete+=kspell
 endfunction
