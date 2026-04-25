@@ -828,12 +828,15 @@ def answer():
         if key not in _internal_keys:
             history[key] = common_config[key]
 
+    # 明确告知引擎是否启用 thinking，避免默认行为导致的性能问题
+    # 注意：不是所有引擎都支持，但 ollama 需要 think: false 来真正关闭 thinking
     if thinking_mode:
-        # 各引擎并未完全统一；同时设置常见字段，服务端可按需忽略未知项
-        history['thinking'] = True
         history['think'] = True
         if engine_type != 'ollama':
             history['reasoning'] = {'enabled': True}
+    else:
+        # 明确关闭 thinking，避免模型进行不必要的思考
+        history['think'] = False
 
     if engine_type == 'ollama':
         history["keep_alive"] = keep_alive
