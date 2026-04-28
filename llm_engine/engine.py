@@ -962,6 +962,7 @@ def answer():
     max_tool_rounds = _get_user_config_item("max_tool_rounds", 10, user_config)
     resp = None
     response_completed = False
+    tool_summaries = []
     try:
         print(_roles['assistant'], end='', flush=True)
 
@@ -997,6 +998,14 @@ def answer():
             content, tool_calls = _stream_response(resp, engine_type, thinking_mode)
 
             if not tool_calls or not tool_defs:
+                # 无工具调用：将收集的摘要输出到文件，作为 assistant 内容的一部分
+                # 这样下次 _parse_input 会把摘要归入 assistant 的上下文
+                if tool_summaries:
+                    print()
+                    print("[tool calls]")
+                    for summary in tool_summaries:
+                        print(summary)
+                    print("[/tool calls]")
                 break
 
             # 有工具调用：执行工具并继续对话
@@ -1038,6 +1047,19 @@ def answer():
                 debug(f"[Tool: {func_name}] {json.dumps(func_args, ensure_ascii=False)}")
 
                 result = execute_tool(func_name, func_args, base_dir)
+
+                # 构建工具调用摘要
+                args_brief = json.dumps(func_args, ensure_ascii=False)
+                if len(args_brief) > 100:
+                    args_brief = args_brief[:97] + '...'
+                if isinstance(result, str):
+                    result_preview = result[:150].replace('\n', '\\n')
+                    if len(result) > 150:
+                        result_preview += '...'
+                else:
+                    result_preview = str(result)[:150]
+                tool_summaries.append(
+                    f"[Tool: {func_name}] {args_brief} -> {result_preview}")
 
                 # 检查是否为图片结果
                 if isinstance(result, dict) and result.get('_image'):
