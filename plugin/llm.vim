@@ -392,10 +392,11 @@ function! s:SetupLLMBuffer()
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
 	" F3: 预览图片（光标在$$...$$位置）
 	nmap <buffer> <F3> :call PreviewImage()<CR>
+	" evim模式和普通模式使用不同的调用，evim也不支持jj，免得误操作
 	if &insertmode
 		inoremap <buffer> <F1> <C-G>u<ESC>:call <SID>DoGenFromInsert()<CR>
-		inoremap <buffer> jj <C-G>u<ESC>:call <SID>DoGenFromInsert()<CR>
 	else
+		imap <buffer> <F1> <C-G>u<ESC>:call DoGen()<CR>
 		imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
 	endif
 
