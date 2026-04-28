@@ -47,6 +47,9 @@ let s:gen_job = v:null
 let s:gen_timer = -1
 let s:gen_state = {}
 
+" 生成是否仍在进行中（用于防止 BufWrite 在 HandleGenExit 后误设置 nomodifiable）
+let s:gen_active = 0
+
 " 中断LLM请求
 function! s:StopGen()
 	if s:gen_job == v:null || job_status(s:gen_job) != 'run'
@@ -65,16 +68,21 @@ function! s:KillGenFallback(timer_id)
 endfunction
 
 " 临时解除nomodifiable写入目标buffer，写完恢复
+" 修复 Windows 竞态: 如果生成已经结束（HandleGenExit已执行），不再恢复nomodifiable
 function! s:BufWrite(buf, lnum, text)
 	call setbufvar(a:buf, '&modifiable', 1)
 	call appendbufline(a:buf, a:lnum, a:text)
-	call setbufvar(a:buf, '&modifiable', 0)
+	if s:gen_active
+		call setbufvar(a:buf, '&modifiable', 0)
+	endif
 endfunction
 
 function! s:BufSetLine(buf, lnum, text)
 	call setbufvar(a:buf, '&modifiable', 1)
 	call setbufline(a:buf, a:lnum, a:text)
-	call setbufvar(a:buf, '&modifiable', 0)
+	if s:gen_active
+		call setbufvar(a:buf, '&modifiable', 0)
+	endif
 endfunction
 
 function! s:RestoreMode(resume_insert)
@@ -132,6 +140,8 @@ function! s:HandleGenExit(job, status)
 		let s:gen_timer = -1
 	endif
 	let s = s:gen_state
+	" 标记生成已结束，防止 BufWrite 竞态后误设置 nomodifiable
+	let s:gen_active = 0
 	let &laststatus = s.old_lst
 	let &statusline = ''
 	if bufexists(s.temp_buf)
@@ -207,6 +217,7 @@ function! DoGen(...)
 
 	" 生成期间设为只读，防止用户编辑导致行号错位
 	setlocal nomodifiable
+	let s:gen_active = 1
 
 	" 初始化状态
 	let s:gen_state = {
