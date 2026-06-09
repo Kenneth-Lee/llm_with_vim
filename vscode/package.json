@@ -27,7 +27,11 @@
     "commands": [
       {
         "command": "llm-chat.submitQuery",
-        "title": "LLM: Submit Query"
+        "title": "LLM: Submit Query (Append Mode)"
+      },
+      {
+        "command": "llm-chat.submitQueryReplace",
+        "title": "LLM: Submit Query (Replace Mode)"
       },
       {
         "command": "llm-chat.stopGeneration",
@@ -42,6 +46,11 @@
       {
         "command": "llm-chat.submitQuery",
         "key": "ctrl+enter",
+        "when": "editorTextFocus && editorLangId == llm-chat"
+      },
+      {
+        "command": "llm-chat.submitQueryReplace",
+        "key": "f5",
         "when": "editorTextFocus && editorLangId == llm-chat"
       },
       {
