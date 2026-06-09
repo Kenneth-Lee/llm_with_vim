@@ -140,7 +140,10 @@ def _make_ollama_api(host, api='chat'):
         return 'http://' + host + ':11434/api/' + api
 
 def debug(msg, noend=False):
-    """输出调试信息到stdout（作为注释）"""
+    """输出调试信息到stdout（作为注释）
+    追加模式下不输出，避免污染编辑器缓冲区"""
+    if os.environ.get('LLM_APPEND_MODE'):
+        return
     if (noend):
         print(f"@// {msg}", end='')
     else:
@@ -452,8 +455,10 @@ def _parse_input():
         output_lines.insert(0, _roles['config'] + user_config + '\n')
 
     # 输出所有收集的行（保留原始输入，但在图片后添加注释）
-    sys.stdout.write(''.join(output_lines))
-    sys.stdout.flush()
+    # 追加模式下不重新输出上下文，仅收集对话历史并发送给LLM
+    if not os.environ.get('LLM_APPEND_MODE'):
+        sys.stdout.write(''.join(output_lines))
+        sys.stdout.flush()
 
     if user_config:
         try:
