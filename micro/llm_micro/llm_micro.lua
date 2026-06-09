@@ -13,7 +13,8 @@ local state = {
     stderrOutput = "",
     cachedEngineCmd = nil,
     stdoutOutput = "",
-    streamEndLoc = nil
+    streamEndLoc = nil,
+    streamStartLoc = nil
 }
 
 math.randomseed(os.Getpid())
@@ -333,6 +334,7 @@ local function normalizeExitArgs(args)
 end
 
 local function endLocForText(text)
+    -- 返回 Loc(X=col, Y=line)，Micro 的 buffer.Loc 字段名为 X（列）和 Y（行）
     local s = text or ""
     local line = 0
     local col = 0
@@ -349,6 +351,13 @@ local function endLocForText(text)
     return buffer.Loc(col, line)
 end
 
+local function offsetEndLoc(baseLoc, text)
+    -- 计算将 text 插入到 baseLoc 后，text 的结束位置（绝对位置）
+    -- 注意：Micro 的 buffer.Loc 字段名为 X（列）和 Y（行）
+    local te = endLocForText(text or "")
+    return buffer.Loc(te.X, baseLoc.Y + te.Y)
+end
+
 local function onLLMStdout(out, args)
     local bp, startLoc = normalizeExitArgs(args)
     if bp == nil or startLoc == nil then
@@ -359,14 +368,26 @@ local function onLLMStdout(out, args)
     end
 
     local chunk = tostring(out):gsub("\r\n", "\n")
-    state.stdoutOutput = state.stdoutOutput .. chunk
 
-    local replaceEnd = state.streamEndLoc
-    if replaceEnd == nil then
-        replaceEnd = buffer.Loc(0, 0)
+    if state.streamStartLoc ~= nil then
+        -- 追加模式：累积输出，替换从 streamStartLoc 到 streamEndLoc 的范围
+        state.stdoutOutput = state.stdoutOutput .. chunk
+        local replaceEnd = state.streamEndLoc
+        if replaceEnd == nil then
+            replaceEnd = state.streamStartLoc
+        end
+        bp.Buf:Replace(state.streamStartLoc, replaceEnd, state.stdoutOutput)
+        state.streamEndLoc = offsetEndLoc(state.streamStartLoc, state.stdoutOutput)
+    else
+        -- 替换模式：从文档开头替换到 streamEndLoc
+        state.stdoutOutput = state.stdoutOutput .. chunk
+        local replaceEnd = state.streamEndLoc
+        if replaceEnd == nil then
+            replaceEnd = buffer.Loc(0, 0)
+        end
+        bp.Buf:Replace(startLoc, replaceEnd, state.stdoutOutput)
+        state.streamEndLoc = endLocForText(state.stdoutOutput)
     end
-    bp.Buf:Replace(startLoc, replaceEnd, state.stdoutOutput)
-    state.streamEndLoc = endLocForText(state.stdoutOutput)
 end
 
 local function onLLMExit(output, args)
@@ -399,17 +420,31 @@ local function onLLMExit(output, args)
     end
 
     local replaced = out .. "\nUser: "
-    local replaceEnd = state.streamEndLoc
-    if replaceEnd == nil then
-        replaceEnd = endLoc
+
+    if state.streamStartLoc ~= nil then
+        -- 追加模式：替换从 streamStartLoc 到 streamEndLoc 的范围
+        -- replaced 末尾不带 \n，以确保文件最后一行是 User: 且尾部无多余空行
+        -- 但这种情况下 buffer 在最后一个 \n 后有一个空行，所以下次提交的 Loc(0, lastLine+1) 有效
+        local replaceEnd = state.streamEndLoc
+        if replaceEnd == nil then
+            replaceEnd = state.streamStartLoc
+        end
+        bp.Buf:Replace(state.streamStartLoc, replaceEnd, replaced .. "\n")
+    else
+        -- 替换模式：从 startLoc 到 endLoc
+        local replaceEnd = state.streamEndLoc
+        if replaceEnd == nil then
+            replaceEnd = endLoc
+        end
+        bp.Buf:Replace(startLoc, replaceEnd, replaced)
     end
-    bp.Buf:Replace(startLoc, replaceEnd, replaced)
 
     state.currentJob = nil
     state.interrupted = false
     state.stderrOutput = ""
     state.stdoutOutput = ""
     state.streamEndLoc = nil
+    state.streamStartLoc = nil
     micro.InfoBar():Message("llm: 请求完成")
 end
 
@@ -423,7 +458,8 @@ local function onLLMStderr(err, args)
     end
 end
 
-function Submit(bp)
+local function doSubmit(bp, appendMode)
+    -- 必须在 Submit / SubmitReplace 之前定义（Lua 局部函数作用域规则）
     if state.currentJob ~= nil then
         micro.InfoBar():Message("llm: 正在请求中，可按 Ctrl+K 或 Alt+K 中断")
         return
@@ -453,18 +489,19 @@ function Submit(bp)
     local endLoc = buffer.Loc(endCol, endLine)
 
     local dir = fileDir(bp)
+    local modeFlag = appendMode and " --append" or ""
     local rawCmd = ""
     if isWindows() then
-        -- Windows 下用 type 管道输入更稳定，并把 stderr 合并到 stdout，避免出现“未返回内容”但看不到错误
-        rawCmd = 'set "LLM_FILE_DIR=' .. dir .. '" && type ' .. cmdQuote(tempPath) .. ' | ' .. engineCmd .. ' 2>&1'
+        -- Windows 下用 type 管道输入更稳定，并把 stderr 合并到 stdout
+        rawCmd = 'set "LLM_FILE_DIR=' .. dir .. '" && type ' .. cmdQuote(tempPath) .. ' | ' .. engineCmd .. modeFlag .. ' 2>&1'
     else
         -- 用 exec 替换外层 sh，确保 Ctrl-K 的 JobStop 能直接终止 llm_engine。
-        rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " exec " .. engineCmd .. " < " .. shellEscape(tempPath)
+        rawCmd = "LLM_FILE_DIR=" .. shellEscape(dir) .. " exec " .. engineCmd .. modeFlag .. " < " .. shellEscape(tempPath)
     end
     local cmd = wrapWithUserShell(rawCmd)
 
     if isWindows() then
-        -- Windows 下 JobStart 对带管道命令的 stdout 回调不稳定，改为同步执行确保拿到输出
+        -- Windows 下同步执行
         local out, runErr = shell.RunCommand(cmd)
         removeFile(tempPath)
 
@@ -480,7 +517,19 @@ function Submit(bp)
             finalOut = "@// llm_engine 未返回内容"
         end
 
-        bp.Buf:Replace(startLoc, endLoc, finalOut .. "\nUser: ")
+        if appendMode then
+            -- 确保 buffer 有足够行数使 Loc(0, endLine+1) 有效
+            local lineCount = bp.Buf:LinesNum()
+            while endLine + 1 >= lineCount do
+                local lastEnd = buffer.Loc(string.len(bp.Buf:Line(lineCount - 1) or ""), lineCount - 1)
+                bp.Buf:Replace(lastEnd, lastEnd, "\n")
+                lineCount = bp.Buf:LinesNum()
+            end
+            local insertLoc = buffer.Loc(0, endLine + 1)
+            bp.Buf:Replace(insertLoc, insertLoc, finalOut .. "\nUser: \n")
+        else
+            bp.Buf:Replace(startLoc, endLoc, finalOut .. "\nUser: ")
+        end
         micro.InfoBar():Message("llm: 请求完成")
         return
     end
@@ -488,9 +537,38 @@ function Submit(bp)
     state.interrupted = false
     state.stderrOutput = ""
     state.stdoutOutput = ""
-    state.streamEndLoc = endLoc
-    state.currentJob = shell.JobStart(cmd, onLLMStdout, onLLMStderr, onLLMExit, bp, startLoc, endLoc, tempPath)
-    micro.InfoBar():Message("llm: 已提交，请求进行中... (Ctrl+K / Alt+K 中断)")
+
+    if appendMode then
+        -- 插入点在光标行的下一行开头。先确保 buffer 有足够行数。
+        local lineCount = bp.Buf:LinesNum()
+        while endLine + 1 >= lineCount do
+            local lastEnd = buffer.Loc(string.len(bp.Buf:Line(lineCount - 1) or ""), lineCount - 1)
+            bp.Buf:Replace(lastEnd, lastEnd, "\n")
+            lineCount = bp.Buf:LinesNum()
+        end
+        local insertLoc = buffer.Loc(0, endLine + 1)
+        state.streamStartLoc = insertLoc
+        state.streamEndLoc = insertLoc
+        state.currentJob = shell.JobStart(cmd, onLLMStdout, onLLMStderr, onLLMExit, bp, insertLoc, insertLoc, tempPath)
+    else
+        state.streamStartLoc = nil
+        state.streamEndLoc = endLoc
+        state.currentJob = shell.JobStart(cmd, onLLMStdout, onLLMStderr, onLLMExit, bp, startLoc, endLoc, tempPath)
+    end
+
+    if appendMode then
+        micro.InfoBar():Message("llm: 已提交（追加模式），请求进行中... (Ctrl+K / Alt+K 中断)")
+    else
+        micro.InfoBar():Message("llm: 已提交（替换模式），请求进行中... (Ctrl+K / Alt+K 中断)")
+    end
+end
+
+function Submit(bp)
+    doSubmit(bp, true)
+end
+
+function SubmitReplace(bp)
+    doSubmit(bp, false)
 end
 
 function Stop(bp)
@@ -552,11 +630,13 @@ function init()
     config.RegisterGlobalOption("plugin.llm_micro", "enginecmd", "")
 
     config.MakeCommand("llmsubmit", Submit, config.NoComplete)
+    config.MakeCommand("llmsubmitreplace", SubmitReplace, config.NoComplete)
     config.MakeCommand("llmstop", Stop, config.NoComplete)
     config.MakeCommand("llmimg", PreviewImage, config.NoComplete)
     config.MakeCommand("llmdoctor", Doctor, config.NoComplete)
 
     config.TryBindKey("F1", "lua:llm_micro.Submit", true)
+    config.TryBindKey("F5", "lua:llm_micro.SubmitReplace", true)
     config.TryBindKey("Ctrl-k", "lua:llm_micro.Stop", true)
     config.TryBindKey("Alt-k", "lua:llm_micro.Stop", true)
     config.TryBindKey("F3", "lua:llm_micro.PreviewImage", true)
