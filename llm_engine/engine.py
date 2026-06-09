@@ -139,10 +139,16 @@ def _make_ollama_api(host, api='chat'):
     else:
         return 'http://' + host + ':11434/api/' + api
 
+# 追加模式（跳过上下文重新输出，直接接收LLM响应）
+_append_mode = '--append' in sys.argv
+
+if _append_mode:
+    sys.argv.remove('--append')
+
 def debug(msg, noend=False):
     """输出调试信息到stdout（作为注释）
     追加模式下不输出，避免污染编辑器缓冲区"""
-    if os.environ.get('LLM_APPEND_MODE'):
+    if _append_mode:
         return
     if (noend):
         print(f"@// {msg}", end='')
@@ -456,7 +462,7 @@ def _parse_input():
 
     # 输出所有收集的行（保留原始输入，但在图片后添加注释）
     # 追加模式下不重新输出上下文，仅收集对话历史并发送给LLM
-    if not os.environ.get('LLM_APPEND_MODE'):
+    if not _append_mode:
         sys.stdout.write(''.join(output_lines))
         sys.stdout.flush()
 

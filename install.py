@@ -137,12 +137,15 @@ def install_vim():
     for vim_dir in vim_dirs:
         plugin_dir = os.path.join(vim_dir, 'plugin')
         ftdetect_dir = os.path.join(vim_dir, 'ftdetect')
+        doc_dir = os.path.join(vim_dir, 'doc')
 
         os.makedirs(plugin_dir, exist_ok=True)
         os.makedirs(ftdetect_dir, exist_ok=True)
+        os.makedirs(doc_dir, exist_ok=True)
 
         src_plugin = os.path.join(SCRIPT_DIR, 'plugin', 'llm.vim')
         src_ftdetect = os.path.join(SCRIPT_DIR, 'ftdetect', 'llm.vim')
+        src_doc = os.path.join(SCRIPT_DIR, 'doc', 'llm.txt')
 
         if not os.path.exists(src_plugin):
             error('源文件不存在: ' + src_plugin)
@@ -150,11 +153,27 @@ def install_vim():
 
         dst_plugin = os.path.join(plugin_dir, 'llm.vim')
         dst_ftdetect = os.path.join(ftdetect_dir, 'llm.vim')
+        dst_doc = os.path.join(doc_dir, 'llm.txt')
 
         # 使用符号链接（Windows 可能降级为复制）
         _link_or_copy(src_plugin, dst_plugin)
         if os.path.exists(src_ftdetect):
             _link_or_copy(src_ftdetect, dst_ftdetect)
+        if os.path.exists(src_doc):
+            _link_or_copy(src_doc, dst_doc)
+            # 生成 helptags，使 :help llm 生效
+            # 优先用当前 vim_cmd，降级到 'vim'，再降级到 'nvim'
+            for cmd in (vim_cmd, 'vim', 'nvim'):
+                if cmd:
+                    try:
+                        subprocess.check_call(
+                            [cmd, '--not-a-term', '-c',
+                             'helptags ' + doc_dir, '-c', 'qa!'],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+                        break
+                    except Exception:
+                        pass
 
         info('Vim 插件已安装到: ' + vim_dir)
         installed = True

@@ -177,7 +177,9 @@ function! s:DoGenFromInsert()
 	call DoGen(1)
 endfunction
 
-function! DoGenAppend(...)
+" 追加模式（新默认）：保持上下文不变，在光标位置追加LLM响应
+" 使用 --append 命令行参数跳过引擎的上下文重输出
+function! DoGen(...)
 	let l:resume_insert = a:0 > 0 ? a:1 : 0
 	" 防止并发请求
 	if s:gen_job != v:null && job_status(s:gen_job) == 'run'
@@ -210,8 +212,6 @@ function! DoGenAppend(...)
 	call bufload(l:temp_buf)
 	call setbufline(l:temp_buf, 1, split(content, "\n"))
 
-	" 追加模式下：不删除原有内容，保留上下文不变
-
 	" 生成期间设为只读，防止用户编辑导致行号错位
 	setlocal nomodifiable
 	let s:gen_active = 1
@@ -230,7 +230,8 @@ function! DoGenAppend(...)
 
 	" 构建命令
 	let l:file_dir = expand('%:p:h')
-	let l:cmd = s:env_status.engine
+	" 追加 --append 参数跳过引擎的上下文重输出
+	let l:cmd = s:env_status.engine . ' --append'
 
 	" 获取文件编码：优先使用 fileencoding，否则使用 encoding
 	let l:file_encoding = &fileencoding
@@ -238,14 +239,14 @@ function! DoGenAppend(...)
 		let l:file_encoding = &encoding
 	endif
 
-	" 异步请求LLM（追加模式：设置 LLM_APPEND_MODE=1 跳过上下文重输出）
+	" 异步请求LLM（默认追加模式）
 	let s:gen_job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
 		\ 'out_cb': function('s:HandleGenOutput'),
 		\ 'err_cb': function('s:HandleGenErr'),
 		\ 'exit_cb': function('s:HandleGenExit'),
-		\ 'env': {'LLM_FILE_DIR': l:file_dir, 'LLM_FILE_ENCODING': l:file_encoding, 'LLM_APPEND_MODE': '1'},
+		\ 'env': {'LLM_FILE_DIR': l:file_dir, 'LLM_FILE_ENCODING': l:file_encoding},
 	\ })
 
 	" 检查job_start是否成功，失败则恢复modifiable
@@ -259,16 +260,17 @@ function! DoGenAppend(...)
 
 	" 设置状态栏并启动定时器
 	let &laststatus = 2
-	let &statusline = '请求LLM [追加模式]...'
+	let &statusline = '请求LLM...'
 	let s:gen_timer = timer_start(500, function('s:GenTimerCb'), {'repeat': -1})
 endfunction
 
-function! s:DoGenAppendFromInsert()
-	call DoGenAppend(1)
+function! s:DoGenReplaceFromInsert()
+	call DoGenReplace(1)
 endfunction
 
-" 把[1,当前行]发入llm_engine获取输出（非阻塞，用户可浏览文件）
-function! DoGen(...)
+" 替换模式（旧默认）：用引擎的过滤后上下文替换缓冲区，从头输出
+" 适合需要整理/修剪上下文的场合
+function! DoGenReplace(...)
 	let l:resume_insert = a:0 > 0 ? a:1 : 0
 	" 防止并发请求
 	if s:gen_job != v:null && job_status(s:gen_job) == 'run'
@@ -331,7 +333,7 @@ function! DoGen(...)
 		let l:file_encoding = &encoding
 	endif
 
-	" 异步请求LLM（exit_cb在进程退出后清理）
+	" 异步请求LLM（不追加 --append，引擎会重新输出上下文）
 	let s:gen_job = job_start(l:cmd, {
 		\ 'in_io': 'buffer',
 		\ 'in_buf': l:temp_buf,
@@ -352,7 +354,7 @@ function! DoGen(...)
 
 	" 设置状态栏并启动定时器
 	let &laststatus = 2
-	let &statusline = '请求LLM...'
+	let &statusline = '请求LLM [替换模式]...'
 	let s:gen_timer = timer_start(500, function('s:GenTimerCb'), {'repeat': -1})
 endfunction
 
@@ -478,22 +480,24 @@ function! s:SetupLLMBuffer()
 	nmap <buffer> j gj
 	nmap <buffer> k gk
 	nnoremap <buffer> K :call <SID>StopGen()<CR>
+	" 默认模式（追加）：保持上下文，光标位置追加输出
 	nmap <buffer> <F1> :call DoGen()<CR>
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
 	" F3: 预览图片（光标在$$...$$位置）
 	nmap <buffer> <F3> :call PreviewImage()<CR>
-	" F5: 追加模式（不替换上下文，仅在当前位置追加输出）
-	nmap <buffer> <F5> :call DoGenAppend()<CR>
+	" F5: 替换模式（旧行为）：用引擎过滤后的上下文替换缓冲区
+	nmap <buffer> <F5> :call DoGenReplace()<CR>
 	" evim模式和普通模式使用不同的调用，evim也不支持jj，免得误操作
 	if &insertmode
 		inoremap <buffer> <F1> <C-G>u<ESC>:call <SID>DoGenFromInsert()<CR>
-		inoremap <buffer> <F5> <C-G>u<ESC>:call <SID>DoGenAppendFromInsert()<CR>
+		inoremap <buffer> <F5> <C-G>u<ESC>:call <SID>DoGenReplaceFromInsert()<CR>
 	else
+		" jj: 追加模式（默认，保持上下文不变）
 		imap <buffer> <F1> <C-G>u<ESC>:call DoGen()<CR>
 		imap <buffer> jj <C-G>u<ESC>:call DoGen()<CR>
-		imap <buffer> <F5> <C-G>u<ESC>:call DoGenAppend()<CR>
-		" jj+ 双j快捷追加模式（jj之后用jj再次发问不覆盖上下文）
-		" 仍在insert模式下按jj的后续处理，暂时不绑定
+		" JJ: 替换模式（大写J快速敲两下，清空历史后从头输出）
+		imap <buffer> <F5> <C-G>u<ESC>:call DoGenReplace()<CR>
+		imap <buffer> JJ <C-G>u<ESC>:call DoGenReplace()<CR>
 	endif
 
 	ab <buffer> configO Configure:  {'engine_type': 'ollama', 'server_addr': 'localhost', 'model': 'gpt-oss:20b', 'max_tokens': 1024, 'temperature': 1, 'keep_alive': 3600, 'tools' : ['read', 'web_search']}
