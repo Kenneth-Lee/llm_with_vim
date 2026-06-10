@@ -67,6 +67,67 @@ function! s:KillGenFallback(timer_id)
 	endif
 endfunction
 
+" Windows 下 job_start 的 in_io:'buffer' 向子进程管道写入大 buffer 会触发 E631
+" 改用临时文件 + in_io:'file' 传入 stdin（避免 cmd 管道触发误报 err_cb）
+function! s:WriteTempInput(content)
+	if has('win32')
+		let l:dir = $TEMP
+		if empty(l:dir)
+			let l:dir = $TMP
+		endif
+		if empty(l:dir)
+			let l:dir = '.'
+		endif
+		let l:sep = '\'
+	else
+		let l:dir = $TMPDIR
+		if empty(l:dir)
+			let l:dir = '/tmp'
+		endif
+		let l:sep = '/'
+	endif
+	let l:path = l:dir . l:sep . 'vim_llm_input_' . getpid() . '_' . localtime() . '.llm'
+	try
+		call writefile(split(a:content, "\n", 1), l:path)
+	catch
+		return ''
+	endtry
+	return l:path
+endfunction
+
+function! s:StartGenJob(engine, append_mode, file_dir, file_encoding, content, temp_buf_name)
+	if has('win32')
+		let l:temp_file = s:WriteTempInput(a:content)
+		if empty(l:temp_file)
+			return {'job': v:null, 'temp_buf': -1, 'temp_file': ''}
+		endif
+		let l:cmd = a:engine . (a:append_mode ? ' --append' : '')
+		let l:job = job_start(l:cmd, {
+			\ 'in_io': 'file',
+			\ 'in_name': l:temp_file,
+			\ 'out_cb': function('s:HandleGenOutput'),
+			\ 'err_cb': function('s:HandleGenErr'),
+			\ 'exit_cb': function('s:HandleGenExit'),
+			\ 'env': {'LLM_FILE_DIR': a:file_dir, 'LLM_FILE_ENCODING': a:file_encoding},
+			\ })
+		return {'job': l:job, 'temp_buf': -1, 'temp_file': l:temp_file}
+	endif
+
+	let l:temp_buf = bufnr(a:temp_buf_name, 1)
+	call bufload(l:temp_buf)
+	call setbufline(l:temp_buf, 1, split(a:content, "\n"))
+	let l:cmd = a:engine . (a:append_mode ? ' --append' : '')
+	let l:job = job_start(l:cmd, {
+		\ 'in_io': 'buffer',
+		\ 'in_buf': l:temp_buf,
+		\ 'out_cb': function('s:HandleGenOutput'),
+		\ 'err_cb': function('s:HandleGenErr'),
+		\ 'exit_cb': function('s:HandleGenExit'),
+		\ 'env': {'LLM_FILE_DIR': a:file_dir, 'LLM_FILE_ENCODING': a:file_encoding},
+		\ })
+	return {'job': l:job, 'temp_buf': l:temp_buf, 'temp_file': ''}
+endfunction
+
 " 临时解除nomodifiable写入目标buffer，写完恢复
 " 修复 Windows 竞态: 如果生成已经结束（HandleGenExit已执行），不再恢复nomodifiable
 function! s:BufWrite(buf, lnum, text)
@@ -125,8 +186,11 @@ function! s:HandleGenOutput(channel, msg)
 	redraw
 endfunction
 
-" 错误回调
+" 错误回调（忽略空消息：Windows cmd 管道关闭时可能触发误报）
 function! s:HandleGenErr(channel, msg)
+	if empty(a:msg)
+		return
+	endif
 	let s = s:gen_state
 	if !bufexists(s.target_buf) | return | endif
 	call s:BufWrite(s.target_buf, 0, a:msg)
@@ -144,7 +208,10 @@ function! s:HandleGenExit(job, status)
 	let s:gen_active = 0
 	let &laststatus = s.old_lst
 	let &statusline = ''
-	if bufexists(s.temp_buf)
+	if get(s, 'temp_file', '') != ''
+		silent! call delete(s.temp_file)
+	endif
+	if s.temp_buf > 0 && bufexists(s.temp_buf)
 		execute 'bdelete! ' . s.temp_buf
 	endif
 	if bufexists(s.target_buf)
@@ -206,20 +273,25 @@ function! DoGen(...)
 	let l:temp_buf_name = 'temp_llm_input_' . l:current_buf
 	let l:cur_line = line('.')
 
-	" 保存开头到当前行到临时Buffer中作为输入（不移除）
+	" 保存开头到当前行作为输入（不移除）
 	let content = join(getline(1, l:cur_line), "\n")
-	let l:temp_buf = bufnr(l:temp_buf_name, 1)
-	call bufload(l:temp_buf)
-	call setbufline(l:temp_buf, 1, split(content, "\n"))
+	let l:file_dir = expand('%:p:h')
+	let l:file_encoding = &fileencoding
+	if empty(l:file_encoding)
+		let l:file_encoding = &encoding
+	endif
 
 	" 生成期间设为只读，防止用户编辑导致行号错位
 	setlocal nomodifiable
 	let s:gen_active = 1
 
+	let l:launch = s:StartGenJob(s:env_status.engine, 1, l:file_dir, l:file_encoding, content, l:temp_buf_name)
+
 	" 初始化状态，line_no设为当前行，流式输出从下一行开始追加
 	let s:gen_state = {
 		\ 'target_buf': l:current_buf,
-		\ 'temp_buf': l:temp_buf,
+		\ 'temp_buf': l:launch.temp_buf,
+		\ 'temp_file': l:launch.temp_file,
 		\ 'line_no': l:cur_line,
 		\ 'interrupted': 0,
 		\ 'int_by_key': 0,
@@ -227,32 +299,15 @@ function! DoGen(...)
 		\ 'old_lst': &laststatus,
 		\ 'start_sec': localtime(),
 	\ }
-
-	" 构建命令
-	let l:file_dir = expand('%:p:h')
-	" 追加 --append 参数跳过引擎的上下文重输出
-	let l:cmd = s:env_status.engine . ' --append'
-
-	" 获取文件编码：优先使用 fileencoding，否则使用 encoding
-	let l:file_encoding = &fileencoding
-	if empty(l:file_encoding)
-		let l:file_encoding = &encoding
-	endif
-
-	" 异步请求LLM（默认追加模式）
-	let s:gen_job = job_start(l:cmd, {
-		\ 'in_io': 'buffer',
-		\ 'in_buf': l:temp_buf,
-		\ 'out_cb': function('s:HandleGenOutput'),
-		\ 'err_cb': function('s:HandleGenErr'),
-		\ 'exit_cb': function('s:HandleGenExit'),
-		\ 'env': {'LLM_FILE_DIR': l:file_dir, 'LLM_FILE_ENCODING': l:file_encoding},
-	\ })
+	let s:gen_job = l:launch.job
 
 	" 检查job_start是否成功，失败则恢复modifiable
 	if s:gen_job == v:null || job_status(s:gen_job) != 'run'
-		" job启动失败，手动恢复状态
 		setlocal modifiable
+		let s:gen_active = 0
+		if l:launch.temp_file != ''
+			silent! call delete(l:launch.temp_file)
+		endif
 		call append(l:cur_line, '<<===启动LLM引擎失败===>>')
 		let s:gen_job = v:null
 		return
@@ -296,11 +351,13 @@ function! DoGenReplace(...)
 	let l:current_buf = bufnr('%')
 	let l:temp_buf_name = 'temp_llm_input_' . l:current_buf
 
-	" 保存开头到当前位置到临时Buffer中作为输入
+	" 保存开头到当前位置作为输入
 	let content = join(getline(1, '.'), "\n")
-	let l:temp_buf = bufnr(l:temp_buf_name, 1)
-	call bufload(l:temp_buf)
-	call setbufline(l:temp_buf, 1, split(content, "\n"))
+	let l:file_dir = expand('%:p:h')
+	let l:file_encoding = &fileencoding
+	if empty(l:file_encoding)
+		let l:file_encoding = &encoding
+	endif
 
 	" 清除用于输入的内容
 	silent keepjumps 1,.delete _
@@ -311,10 +368,13 @@ function! DoGenReplace(...)
 	setlocal nomodifiable
 	let s:gen_active = 1
 
+	let l:launch = s:StartGenJob(s:env_status.engine, 0, l:file_dir, l:file_encoding, content, l:temp_buf_name)
+
 	" 初始化状态
 	let s:gen_state = {
 		\ 'target_buf': l:current_buf,
-		\ 'temp_buf': l:temp_buf,
+		\ 'temp_buf': l:launch.temp_buf,
+		\ 'temp_file': l:launch.temp_file,
 		\ 'line_no': 0,
 		\ 'interrupted': 0,
 		\ 'int_by_key': 0,
@@ -322,31 +382,15 @@ function! DoGenReplace(...)
 		\ 'old_lst': &laststatus,
 		\ 'start_sec': localtime(),
 	\ }
-
-	" 构建命令
-	let l:file_dir = expand('%:p:h')
-	let l:cmd = s:env_status.engine
-
-	" 获取文件编码：优先使用 fileencoding，否则使用 encoding
-	let l:file_encoding = &fileencoding
-	if empty(l:file_encoding)
-		let l:file_encoding = &encoding
-	endif
-
-	" 异步请求LLM（不追加 --append，引擎会重新输出上下文）
-	let s:gen_job = job_start(l:cmd, {
-		\ 'in_io': 'buffer',
-		\ 'in_buf': l:temp_buf,
-		\ 'out_cb': function('s:HandleGenOutput'),
-		\ 'err_cb': function('s:HandleGenErr'),
-		\ 'exit_cb': function('s:HandleGenExit'),
-		\ 'env': {'LLM_FILE_DIR': l:file_dir, 'LLM_FILE_ENCODING': l:file_encoding},
-	\ })
+	let s:gen_job = l:launch.job
 
 	" 检查job_start是否成功，失败则恢复modifiable
 	if s:gen_job == v:null || job_status(s:gen_job) != 'run'
-		" job启动失败，手动恢复状态
 		setlocal modifiable
+		let s:gen_active = 0
+		if l:launch.temp_file != ''
+			silent! call delete(l:launch.temp_file)
+		endif
 		call append(0, '<<===启动LLM引擎失败===>>')
 		let s:gen_job = v:null
 		return
