@@ -44,7 +44,7 @@
       "patterns": [
         {
           "name": "keyword.control.llm-chat",
-          "match": "^(Assistant|System):"
+          "match": "^(Assistant|System|Tool):"
         }
       ]
     }

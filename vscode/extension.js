@@ -164,8 +164,44 @@ async function submitQueryImpl(appendMode) {
                 documentProcesses.delete(documentUri);
 
                 if (code !== 0) {
-                    vscode.window.showErrorMessage(`LLM process exited with code ${code}: ${errorBuffer}`);
-                    reject(new Error(errorBuffer));
+                    if (appendMode) {
+                        const applyErrorBlock = () => {
+                            const rawLines = (errorBuffer || `LLM process exited with code ${code}`)
+                                .split(/\r?\n/)
+                                .filter(line => line.trim().length > 0);
+                            const commentLines = rawLines.map(line =>
+                                line.startsWith('@//') ? line : `@// ERROR: ${line}`
+                            );
+                            const errorBlock = (commentLines.length > 0 ? commentLines.join('\n') + '\n' : '') + 'User: ';
+
+                            editor.edit(editBuilder => {
+                                editBuilder.insert(new vscode.Position(insertLine, 0), errorBlock);
+                            }).then(() => {
+                                const userLine = insertLine + Math.max(commentLines.length, 0);
+                                if (userLine < editor.document.lineCount) {
+                                    const userLen = editor.document.lineAt(userLine).text.length;
+                                    editor.selection = new vscode.Selection(userLine, userLen, userLine, userLen);
+                                    editor.revealRange(new vscode.Range(userLine, 0, userLine, 0));
+                                }
+                                vscode.window.showErrorMessage(`LLM process exited with code ${code}: ${errorBuffer}`);
+                                reject(new Error(errorBuffer));
+                            });
+                        };
+
+                        if (editInProgress) {
+                            let checkInterval = setInterval(() => {
+                                if (!editInProgress) {
+                                    clearInterval(checkInterval);
+                                    applyErrorBlock();
+                                }
+                            }, 50);
+                        } else {
+                            applyErrorBlock();
+                        }
+                    } else {
+                        vscode.window.showErrorMessage(`LLM process exited with code ${code}: ${errorBuffer}`);
+                        reject(new Error(errorBuffer));
+                    }
                     return;
                 }
 

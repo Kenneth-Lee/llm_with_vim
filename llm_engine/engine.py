@@ -12,6 +12,8 @@ import requests
 import signal
 import re
 import base64
+import hashlib
+import copy
 
 # SIGTERM 处理：收到信号时关闭流式连接并退出
 _active_response = None
@@ -57,6 +59,7 @@ _roles = {
     "system":    "System: ",
     "user":      "User: ",
     "assistant": "Assistant: ",
+    "tool":      "Tool: ",
     "config":    "Configure: ",
 }
 
@@ -75,7 +78,7 @@ def _detect_role_line(line):
             return role_name, line[len(role_prefix):]
 
     # 宽松匹配：Role[:：][可选空格]content
-    m = re.match(r'^(System|User|Assistant|Configure)\s*[:：]\s?(.*)$', line)
+    m = re.match(r'^(System|User|Assistant|Tool|Configure)\s*[:：]\s?(.*)$', line)
     if m:
         role_text = m.group(1).lower()
         content = m.group(2)
@@ -158,6 +161,17 @@ def debug(msg, noend=False):
 def think(msg):
     debug(f"[think] {msg}");
 
+
+def report_error(msg):
+    """统一错误输出到 stderr，避免在追加模式下被 debug 抑制。"""
+    if msg is None:
+        return
+    text = str(msg)
+    if not text.endswith('\n'):
+        text += '\n'
+    sys.stderr.write(text)
+    sys.stderr.flush()
+
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
     if _verbose_mode:
@@ -216,6 +230,81 @@ def _extract_images(content, base_dir=''):
     processed_content = re.sub(pattern, replace_image, content)
     return processed_content, images
 
+
+def _normalize_content_text(text):
+    """对消息文本做最小归一化：仅统一换行风格，不裁剪首尾空白。"""
+    if text is None:
+        return ''
+    if not isinstance(text, str):
+        text = str(text)
+    return text.replace('\r\n', '\n').replace('\r', '\n')
+
+
+def _stable_json_dumps(obj):
+    """稳定 JSON 序列化，保证同输入同输出。"""
+    return json.dumps(
+        obj,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+        allow_nan=False,
+    )
+
+
+def _sha256_text(text):
+    """计算 UTF-8 文本的 SHA-256。"""
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def _post_stream_request(api, payload_obj, headers, timeout, trace_label=''):
+    """使用稳定 JSON 字节串发起流式请求，返回 (resp, payload_hash)。"""
+    payload_text = _stable_json_dumps(payload_obj)
+    payload_hash = _sha256_text(payload_text)
+    if trace_label:
+        verbose_debug(f"{trace_label}.payload_hash={payload_hash}")
+    resp = requests.post(
+        api,
+        data=payload_text.encode('utf-8'),
+        headers=headers,
+        stream=True,
+        timeout=timeout,
+    )
+    return resp, payload_hash
+
+
+def _format_tool_role_content(func_name, func_args, result_text, tool_call_id=''):
+    """生成 Tool 角色的稳定编码文本（单行 JSON，便于编辑与重放）。"""
+    payload = {
+        'v': 1,
+        'name': func_name,
+        'arguments': func_args if isinstance(func_args, dict) else str(func_args),
+        'result': result_text if isinstance(result_text, str) else str(result_text),
+    }
+    if tool_call_id:
+        payload['id'] = tool_call_id
+    return _stable_json_dumps(payload)
+
+
+def _decode_tool_role_content(content):
+    """解析 Tool 角色编码，提取可提交给模型的 tool content。"""
+    normalized = _normalize_content_text(content)
+    candidate = normalized.strip()
+    if not candidate:
+        return ''
+
+    try:
+        data = json.loads(candidate)
+    except (json.JSONDecodeError, TypeError):
+        return normalized
+
+    if not isinstance(data, dict):
+        return normalized
+    if data.get('v') != 1 or 'result' not in data:
+        return normalized
+
+    result = data.get('result', '')
+    return result if isinstance(result, str) else str(result)
+
 def _add_msg(req, role, content, images=None):
     """给请求增加某个角色的消息，支持多模态"""
     if not content and not images:
@@ -223,12 +312,19 @@ def _add_msg(req, role, content, images=None):
 
     msg = {"role": role}
 
+    normalized_content = _normalize_content_text(content)
+
+    if role == 'tool':
+        msg['content'] = _decode_tool_role_content(normalized_content)
+        req['messages'].append(msg)
+        return
+
     if images:
         # 多模态消息格式（Ollama 风格）
-        msg["content"] = content.strip() if content else ""
+        msg["content"] = normalized_content
         msg["images"] = [img['base64'] for img in images]
     else:
-        msg["content"] = content.strip()
+        msg["content"] = normalized_content
 
     req['messages'].append(msg)
 
@@ -244,7 +340,7 @@ def _parse_input():
     - 支持 $$图片路径$$ 语法嵌入多模态内容
     """
     global _config
-    history = _config["request_template"]
+    history = copy.deepcopy(_config["request_template"])
     history["messages"] = []
     user_config = None
 
@@ -950,6 +1046,13 @@ def answer():
                 debug(f"多模态消息包含 {len(msg['content'])} 部分")
             break
 
+    try:
+        context_snapshot = {'messages': history.get('messages', [])}
+        context_hash = _sha256_text(_stable_json_dumps(context_snapshot))
+        verbose_debug(f"context_hash={context_hash}")
+    except (TypeError, ValueError) as e:
+        verbose_debug(f"context_hash_unavailable={e}")
+
     # 详细调试信息（需要verbose=True才输出）
     verbose_debug(f"engine_type={engine_type}")
     verbose_debug(f"api={api}")
@@ -973,7 +1076,7 @@ def answer():
     max_tool_rounds = _get_user_config_item("max_tool_rounds", 10, user_config)
     resp = None
     response_completed = False
-    tool_summaries = []
+    request_failed = False
     try:
         print(_roles['assistant'], end='', flush=True)
 
@@ -981,8 +1084,13 @@ def answer():
             # 每轮请求前转换多模态消息格式
             history['messages'] = convert_multimodal_messages(
                 history['messages'], engine_type)
-            resp = requests.post(api, json=history, headers=headers,
-                                 stream=True, timeout=timeout)
+            resp, _payload_hash = _post_stream_request(
+                api,
+                history,
+                headers,
+                timeout,
+                trace_label=f"round{tool_round + 1}",
+            )
             _active_response = resp
             # 如果 400 且含图片，可能是模型不支持视觉，去掉图片重试
             if resp.status_code == 400:
@@ -1001,22 +1109,19 @@ def answer():
                                 if isinstance(p, dict) and p.get('type') == 'text'
                             ]
                             msg['content'] = ' '.join(text_parts) if text_parts else ''
-                    resp = requests.post(api, json=history, headers=headers,
-                                         stream=True, timeout=timeout)
+                    resp, _payload_hash = _post_stream_request(
+                        api,
+                        history,
+                        headers,
+                        timeout,
+                        trace_label=f"round{tool_round + 1}.retry_no_image",
+                    )
                     _active_response = resp
             resp.raise_for_status()
 
             content, tool_calls = _stream_response(resp, engine_type, thinking_mode)
 
             if not tool_calls or not tool_defs:
-                # 无工具调用：将收集的摘要输出到文件，作为 assistant 内容的一部分
-                # 这样下次 _parse_input 会把摘要归入 assistant 的上下文
-                if tool_summaries:
-                    print()
-                    print("[tool calls]")
-                    for summary in tool_summaries:
-                        print(summary)
-                    print("[/tool calls]")
                 break
 
             # 有工具调用：执行工具并继续对话
@@ -1059,23 +1164,18 @@ def answer():
 
                 result = execute_tool(func_name, func_args, base_dir)
 
-                # 构建工具调用摘要
-                args_brief = json.dumps(func_args, ensure_ascii=False)
-                if len(args_brief) > 100:
-                    args_brief = args_brief[:97] + '...'
-                if isinstance(result, str):
-                    result_preview = result[:150].replace('\n', '\\n')
-                    if len(result) > 150:
-                        result_preview += '...'
-                else:
-                    result_preview = str(result)[:150]
-                tool_summaries.append(
-                    f"[Tool: {func_name}] {args_brief} -> {result_preview}")
-
                 # 检查是否为图片结果
                 if isinstance(result, dict) and result.get('_image'):
                     text_result = result['text']
                     debug(f"[Result: {func_name}] {text_result}")
+
+                    tool_role_content = _format_tool_role_content(
+                        func_name,
+                        func_args,
+                        text_result,
+                        tc.get('id', ''),
+                    )
+                    print(_roles['tool'] + tool_role_content)
 
                     # 工具结果（文本说明）
                     tool_msg = {"role": "tool", "content": text_result}
@@ -1097,7 +1197,16 @@ def answer():
                         preview = str(result)[:200]
                     debug(f"[Result: {func_name}] {preview}")
 
-                    tool_msg = {"role": "tool", "content": result if isinstance(result, str) else str(result)}
+                    result_text = result if isinstance(result, str) else str(result)
+                    tool_role_content = _format_tool_role_content(
+                        func_name,
+                        func_args,
+                        result_text,
+                        tc.get('id', ''),
+                    )
+                    print(_roles['tool'] + tool_role_content)
+
+                    tool_msg = {"role": "tool", "content": result_text}
                     if tc.get('id'):
                         tool_msg["tool_call_id"] = tc['id']
                     if engine_type == 'ollama':
@@ -1119,15 +1228,22 @@ def answer():
         response_completed = True
         print()
     except requests.exceptions.HTTPError as e:
+        request_failed = True
         debug(f"{os.linesep}HTTP error occurred: {e}")
+        report_error(f"HTTP error occurred: {e}")
         if hasattr(e, 'response') and e.response is not None:
             try:
                 debug(f"Response body: {e.response.text[:500]}")
+                report_error(f"Response body: {e.response.text[:500]}")
             except Exception:
                 pass
     except Exception as e:
+        request_failed = True
         debug(f"{os.linesep} request fail: {e}")
+        report_error(f"request fail: {e}")
     finally:
         _active_response = None
 
     debug(f"updated at {time.asctime()} in {(time.time()-start_time):.1f} seconds", noend=True)
+    if request_failed:
+        sys.exit(2)

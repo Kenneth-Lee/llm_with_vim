@@ -193,7 +193,18 @@ function! s:HandleGenErr(channel, msg)
 	endif
 	let s = s:gen_state
 	if !bufexists(s.target_buf) | return | endif
-	call s:BufWrite(s.target_buf, 0, a:msg)
+	let l:lines = split(substitute(a:msg, '\r', '', 'g'), "\n", 1)
+	for l:line in l:lines
+		if empty(l:line)
+			continue
+		endif
+		if l:line =~ '^@//'
+			call s:BufWrite(s.target_buf, s.line_no, l:line)
+		else
+			call s:BufWrite(s.target_buf, s.line_no, '@// ERROR: ' . l:line)
+		endif
+		let s.line_no += 1
+	endfor
 	let s.interrupted = 2
 endfunction
 
@@ -220,7 +231,9 @@ function! s:HandleGenExit(job, status)
 		if s.int_by_key
 			call appendbufline(s.target_buf, s.line_no, '<<===中断操作===>>')
 		elseif s.interrupted
-			call appendbufline(s.target_buf, s.line_no, '<<===执行错误，尽快undo，不要存盘！！===>>')
+			call appendbufline(s.target_buf, s.line_no, '@// ERROR: 请求失败，请检查上方错误信息')
+			let s.line_no += 1
+			call appendbufline(s.target_buf, s.line_no, 'User: ')
 		else
 			call appendbufline(s.target_buf, s.line_no, 'User: ')
 		endif
@@ -516,7 +529,7 @@ function! s:SetupLLMBuffer()
 	syn match Title "^Configure: .*$"
 	" 图片引用语法 $$path$$
 	syn match Special "\$\$[^$]*\$\$"
-	syn keyword Type Assistant System
+	syn keyword Type Assistant System Tool
 	syn match Type "^@@inc "
 	syn keyword Keyword User
 
