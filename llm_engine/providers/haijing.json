@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "spec_version": 1,
+  "id": "haijing",
+  "display_name": "Haijing",
+  "protocol": "raw_lines",
+  "defaults": {
+    "model": "DeepSeek-R1",
+    "connect_timeout": 30,
+    "read_timeout": 1800,
+    "stream": true,
+    "thinking": false
+  },
+  "endpoint": {
+    "template": "https://api.atalk-ai.com/chat/completions",
+    "default_host": "api.atalk-ai.com",
+    "default_port": 443
+  },
+  "model_query": {
+    "url_template": ""
+  },
+  "auth": {
+    "type": "header",
+    "header_name": "Authorization"
+  },
+  "features": {
+    "tools": true,
+    "vision": false,
+    "reasoning": true,
+    "streaming": true
+  },
+  "aliases": {
+    "model": {
+      "default": "DeepSeek-R1"
+    }
+  },
+  "request_mapping": {
+    "messages": "messages",
+    "model": "model",
+    "temperature": "temperature",
+    "max_tokens": "max_tokens",
+    "stream": "stream",
+    "tools": "tools"
+  },
+  "response_mapping": {
+    "mode": "raw_lines",
+    "content_path": "line",
+    "tool_calls_path": ""
+  },
+  "overrides": {
+    "allowed_in_session": [
+      "model",
+      "temperature",
+      "max_tokens",
+      "tools",
+      "thinking",
+      "server_addr"
+    ],
+    "readonly": [
+      "protocol",
+      "response_mapping.mode"
+    ]
+  }
+}

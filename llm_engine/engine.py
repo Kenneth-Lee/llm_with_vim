@@ -15,6 +15,13 @@ import base64
 import hashlib
 import copy
 
+from llm_engine.provider_spec import (
+    get_config_root,
+    get_legacy_user_config_path,
+    load_json_file,
+    resolve_provider_runtime,
+)
+
 # SIGTERM 处理：收到信号时关闭流式连接并退出
 _active_response = None
 
@@ -91,7 +98,8 @@ def _load_config():
 
     配置优先级（从高到低）：
       1. 每个 .llm 文件中的 Configure: 行（运行时覆盖）
-      2. 用户配置 ~/.config/llm_engine/llm_engine.json
+            2. 用户配置 ~/.config/contextforge/config.json
+            3. 兼容旧配置 ~/.config/llm_engine/llm_engine.json
       3. 包内置默认配置 default_config.json
 
     用户配置文件只需包含需要修改的部分（如 auth_keys），会与默认配置深度合并。
@@ -102,25 +110,27 @@ def _load_config():
         # 先加载内置默认配置作为基础
         default_path = os.path.join(
             os.path.dirname(__file__), 'default_config.json')
-        try:
-            with open(default_path, 'r', encoding='utf-8') as f:
-                _config = json.load(f)
-        except (IOError, json.JSONDecodeError) as e:
-            print("Error loading default config: %s" % e, file=sys.stderr)
+        _config = load_json_file(default_path)
+        if _config is None:
+            print("Error loading default config: %s" % default_path, file=sys.stderr)
             sys.exit(1)
 
-        # 查找用户配置文件
-        user_config_path = os.environ.get('LLM_ENGINE_CONFIG') or \
-            os.path.join(os.path.expanduser('~'),
-                         '.config', 'llm_engine', 'llm_engine.json')
+        # 先加载旧配置，再加载新配置目录，最后允许显式环境变量覆盖
+        user_config_paths = [
+            get_legacy_user_config_path(),
+            os.path.join(get_config_root(), 'config.json'),
+        ]
+        env_config_path = os.environ.get('LLM_ENGINE_CONFIG')
+        if env_config_path:
+            env_config_path = os.path.expanduser(env_config_path)
+            if env_config_path not in user_config_paths:
+                user_config_paths.append(env_config_path)
 
-        if os.path.isfile(user_config_path):
-            try:
-                with open(user_config_path, 'r', encoding='utf-8') as f:
-                    user_cfg = json.load(f)
-                _deep_merge(_config, user_cfg)
-            except (IOError, json.JSONDecodeError):
-                pass
+        for user_config_path in user_config_paths:
+            if os.path.isfile(user_config_path):
+                user_cfg = load_json_file(user_config_path)
+                if user_cfg:
+                    _deep_merge(_config, user_cfg)
 
     return _config
 
@@ -827,18 +837,22 @@ def answer():
     # 获取verbose配置（尽早获取，以便后续调试信息能正确输出）
     _verbose_mode = _get_user_config_item("verbose", False, user_config)
 
-    # API请求头部
-    headers = {'Content-Type': 'application/json'}
-
     # 组合配置
-    common_config = _config['default_config']
-    engine_type = _get_user_config_item("engine_type", "ollama", user_config)
-    server_addr = _get_user_config_item("server_addr", "localhost", user_config)
+    base_config = copy.deepcopy(_config['default_config'])
+    provider_id = _get_user_config_item("engine_type", "ollama", user_config)
+    provider_runtime = resolve_provider_runtime(provider_id, base_config, _config, session_config=user_config)
+    provider_spec = provider_runtime['spec']
+    engine_type = provider_runtime['provider_id']
+    common_config = provider_runtime['runtime_config']
     for key in common_config.keys():
         common_config[key] = _get_user_config_item(key, common_config[key], user_config)
-    thinking_mode = _get_user_config_item("thinking", False, user_config)
+    server_addr = common_config.get('server_addr', provider_spec.get('endpoint', {}).get('default_host', 'localhost'))
+    thinking_mode = _get_user_config_item("thinking", common_config.get('thinking', False), user_config)
     if engine_type == "ollama":
-        keep_alive = _get_user_config_item("keep_alive", 60, user_config)
+        keep_alive = _get_user_config_item("keep_alive", common_config.get('keep_alive', 60), user_config)
+
+    # API请求头部（spec 负责默认认证方式）
+    headers = provider_runtime['headers']
 
     # 获取超时配置
     connect_timeout = common_config.get('connect_timeout', 30)
@@ -895,7 +909,17 @@ def answer():
     if common_config['model'] == 'TELLME':
         models = []
         try:
-            if engine_type == 'ollama':
+            model_query_url = provider_runtime.get('model_query_url')
+            if model_query_url:
+                resp = requests.get(model_query_url, headers=headers, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                if provider_spec.get('protocol') == 'ollama_native':
+                    if 'models' in data:
+                        models = [m['name'] for m in data['models']]
+                elif 'data' in data:
+                    models = [m['id'] for m in data['data']]
+            elif engine_type == 'ollama':
                 # Ollama 使用 /api/tags 查询模型
                 tags_api = _make_ollama_api(server_addr, 'tags')
                 resp = requests.get(tags_api, timeout=timeout)

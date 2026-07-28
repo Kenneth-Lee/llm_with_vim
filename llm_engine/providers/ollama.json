@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "spec_version": 1,
+  "id": "ollama",
+  "display_name": "Ollama",
+  "protocol": "ollama_native",
+  "defaults": {
+    "model": "qwen2.5:0.5b",
+    "connect_timeout": 30,
+    "read_timeout": 1800,
+    "stream": true,
+    "thinking": false,
+    "keep_alive": 3600
+  },
+  "endpoint": {
+    "template": "http://{host}:{port}/api/chat",
+    "default_host": "localhost",
+    "default_port": 11434
+  },
+  "model_query": {
+    "url_template": "http://{host}:{port}/api/tags"
+  },
+  "auth": {
+    "type": "none"
+  },
+  "features": {
+    "tools": true,
+    "vision": true,
+    "reasoning": true,
+    "streaming": true
+  },
+  "aliases": {
+    "server": {
+      "default": "localhost",
+      "home": "192.168.31.100",
+      "aliyun": "47.98.228.76",
+      "txyun": "43.139.74.214"
+    },
+    "model": {
+      "qwen": "qwen2.5:0.5b",
+      "llama": "llama3.2:1b",
+      "deepseek": "deepseek-r1:1.5b"
+    }
+  },
+  "request_mapping": {
+    "messages": "messages",
+    "model": "model",
+    "temperature": "temperature",
+    "max_tokens": "max_tokens",
+    "stream": "stream",
+    "tools": "tools",
+    "keep_alive": "keep_alive",
+    "think": "think",
+    "reasoning": "reasoning"
+  },
+  "response_mapping": {
+    "mode": "json_line_ollama",
+    "content_path": "message.content",
+    "tool_calls_path": "message.tool_calls"
+  },
+  "overrides": {
+    "allowed_in_session": [
+      "model",
+      "temperature",
+      "max_tokens",
+      "tools",
+      "thinking",
+      "server_addr",
+      "keep_alive"
+    ],
+    "readonly": [
+      "protocol",
+      "response_mapping.mode"
+    ]
+  }
+}

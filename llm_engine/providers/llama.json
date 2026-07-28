@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "spec_version": 1,
+  "id": "llama",
+  "display_name": "Llama.cpp",
+  "protocol": "openai_compat",
+  "defaults": {
+    "model": "llama3.2:1b",
+    "connect_timeout": 30,
+    "read_timeout": 1800,
+    "stream": false,
+    "thinking": false
+  },
+  "endpoint": {
+    "template": "http://{server_addr}/v1/chat/completions",
+    "default_host": "localhost",
+    "default_port": 80
+  },
+  "model_query": {
+    "url_template": "http://{server_addr}/v1/models"
+  },
+  "auth": {
+    "type": "none"
+  },
+  "features": {
+    "tools": false,
+    "vision": true,
+    "reasoning": false,
+    "streaming": false
+  },
+  "aliases": {
+    "model": {
+      "llama": "llama3.2:1b",
+      "default": "llama3.2:1b"
+    }
+  },
+  "request_mapping": {
+    "messages": "messages",
+    "model": "model",
+    "temperature": "temperature",
+    "max_tokens": "max_tokens",
+    "stream": "stream"
+  },
+  "response_mapping": {
+    "mode": "json_full",
+    "content_path": "choices[0].message.content",
+    "tool_calls_path": "choices[0].message.tool_calls"
+  },
+  "overrides": {
+    "allowed_in_session": [
+      "model",
+      "temperature",
+      "max_tokens",
+      "server_addr"
+    ],
+    "readonly": [
+      "protocol",
+      "response_mapping.mode"
+    ]
+  }
+}
