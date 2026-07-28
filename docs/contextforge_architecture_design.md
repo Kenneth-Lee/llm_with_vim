@@ -11,6 +11,20 @@
   - 统一用户级配置目录，采用类似主流 Agent 工具的配置方式。
   - 保留并强化“可编辑上下文即记忆”的产品哲学。
 
+### 1.2 强约束（用户体验与兼容性）
+
+本重构必须满足以下强约束：
+
+1. 用户配置必须“简单可省略”
+- 零配置可运行（使用内置 provider 默认值）。
+- 常用场景只需要极少字段（例如 `engine_type`、`model`）。
+- 配置错误必须给出明确诊断和建议修复，不要求用户理解协议细节。
+
+2. 会话接口保持兼容
+- 保留当前 `.llm` 中 `Configure:` 角色的定义方式。
+- 既有字段命名尽量保持不变（如 `engine_type`、`server_addr`、`model` 等）。
+- 新能力采用“可选扩展”，不要求老会话文件改写。
+
 ### 1.1 现状问题
 
 当前实现在功能上可用，但存在以下系统性问题：
@@ -293,6 +307,33 @@ contextforge/
 - 每层加载先做 schema 校验
 - 合并后做一次最终校验
 
+### 5.1.7 友好报错与建议策略
+
+为满足“用户不需要关心细节”，配置系统必须提供分级错误信息：
+
+1. 语法错误
+- 示例：`Configure:` 不是合法 JSON/Python 字典。
+- 输出：指出行、字段，并给最小可用示例。
+
+2. 字段错误
+- 示例：未知字段、类型不匹配、越界值。
+- 输出：
+  - 说明当前值为何不合法
+  - 给出允许值范围或候选值
+  - 给出“是否回退默认值”的明确提示
+
+3. 覆盖冲突
+- 示例：会话层覆盖了只读协议字段。
+- 输出：
+  - 明确“覆盖被拒绝”的字段名
+  - 指出该字段允许修改的层级
+  - 给替代做法（例如“新增 provider spec 而不是在会话覆盖”）
+
+4. 自动建议
+- `engine_type` 拼写接近时，提示最相近 provider id。
+- `model` 不存在时，提示 alias 或可查询模型列表入口。
+- `server_addr` 缺失时，提示将使用 provider 默认地址。
+
 ### 5.1.5 Provider 定义与用户覆盖的边界
 
 Provider Spec 负责“协议和能力”，用户配置负责“参数和偏好”。
@@ -489,6 +530,63 @@ response_mapping.mode = json_line_ollama (source: L0 readonly, override denied a
 3. secrets 默认策略：文件还是 keyring 优先
 4. 迁移期命令别名保留多久
 5. 文档和仓库重命名节奏（先内部模块名还是先外部命令名）
+
+## 11.1 Provider Schema v1 字段决策表
+
+本表用于冻结 v1 的字段归属与覆盖策略，后续实现按表执行。
+
+| 字段 | 归属类型 | 默认来源层 | 会话层覆盖 | 工作区覆盖 | 备注 |
+|---|---|---|---|---|---|
+| `id` | App-owned | L0/L1 | 否 | 否 | Provider 身份标识，协议契约字段 |
+| `display_name` | App-owned | L0/L1 | 否 | 否 | 展示字段，不参与请求 |
+| `schema_version` | App-owned | L0/L1 | 否 | 否 | Schema 版本，校验专用 |
+| `spec_version` | App-owned | L0/L1 | 否 | 否 | Provider 版本，迁移专用 |
+| `protocol` | App-owned | L0/L1 | 否 | 否 | 协议类型，运行时分派依据 |
+| `endpoint.template` | App-owned | L0/L1 | 否 | 否 | URL 模板属于协议契约 |
+| `endpoint.default_host` | User-owned | L0/L1/L3 | 是 | 是 | 允许按环境覆盖默认主机 |
+| `endpoint.default_port` | User-owned | L0/L1/L3 | 是 | 是 | 允许按环境覆盖端口 |
+| `auth.type` | App-owned | L0/L1 | 否 | 否 | 认证方式契约（none/header/query） |
+| `auth.header_name` | App-owned | L0/L1 | 否 | 否 | 认证字段契约 |
+| `auth.prefix_template` | App-owned | L0/L1 | 否 | 否 | 如 `Bearer {token}`，避免会话层篡改 |
+| `defaults.model` | User-owned | L0/L1/L2/L3 | 是 | 是 | 常见会话覆盖字段 |
+| `defaults.temperature` | User-owned | L0/L1/L2/L3 | 是 | 是 | 常见会话覆盖字段 |
+| `defaults.max_tokens` | User-owned | L0/L1/L2/L3 | 是 | 是 | 常见会话覆盖字段 |
+| `defaults.connect_timeout` | User-owned | L0/L1/L2/L3 | 是 | 是 | 网络环境相关 |
+| `defaults.read_timeout` | User-owned | L0/L1/L2/L3 | 是 | 是 | 网络环境相关 |
+| `defaults.stream` | User-owned | L0/L1/L2/L3 | 是 | 是 | 会话可按需关闭 |
+| `defaults.thinking` | User-owned | L0/L1/L2/L3 | 是 | 是 | 会话策略字段 |
+| `defaults.keep_alive` | User-owned | L0/L1/L2/L3 | 是 | 是 | 仅特定 provider 生效 |
+| `features.tools` | App-owned | L0/L1 | 否 | 否 | 能力声明，不应会话伪造 |
+| `features.vision` | App-owned | L0/L1 | 否 | 否 | 能力声明，不应会话伪造 |
+| `features.reasoning` | App-owned | L0/L1 | 否 | 否 | 能力声明，不应会话伪造 |
+| `request_mapping.*` | App-owned | L0/L1 | 否 | 否 | 字段映射契约，需稳定 |
+| `response_mapping.mode` | App-owned | L0/L1 | 否 | 否 | 解析模式契约字段 |
+| `response_mapping.content_path` | App-owned | L0/L1 | 否 | 否 | 解析路径契约字段 |
+| `response_mapping.tool_calls_path` | App-owned | L0/L1 | 否 | 否 | 解析路径契约字段 |
+| `aliases.model.*` | User-owned | L0/L1/L3 | 是 | 是 | 允许用户定义本地模型别名 |
+| `aliases.server.*` | User-owned | L0/L1/L3 | 是 | 是 | 允许用户定义本地服务器别名 |
+| `overrides.allowed_in_session` | App-owned | L0/L1 | 否 | 否 | 覆盖策略本身不可会话修改 |
+| `overrides.allowed_in_workspace` | App-owned | L0/L1 | 否 | 否 | 覆盖策略本身不可工作区修改 |
+| `overrides.readonly` | App-owned | L0/L1 | 否 | 否 | 只读策略定义 |
+| `hooks.*` | App-owned | L0/L1 | 否 | 否 | 仅允许白名单内置 hook |
+| `secrets.<provider>.token_ref` | User-owned | L2 | 否 | 否 | 建议仅用户层配置，不入会话文本 |
+| `session.tools` | Session-owned | L5 | 是 | 是 | 会话显式声明工具列表 |
+| `session.server_addr` | Session-owned | L5 | 是 | 是 | 会话临时路由，受白名单约束 |
+
+### 11.1.1 冻结承诺（v1）
+
+1. 协议契约字段（`protocol`、`request_mapping`、`response_mapping`、`auth.type`）在 v1 一律只读。
+2. 会话层可改运行参数，但必须在 `overrides.allowed_in_session` 白名单内。
+3. secrets 不进入 `.llm` 会话文本；会话层仅允许引用，不允许直接明文落盘。
+4. 若会话层覆盖只读字段：
+- 默认模式：拒绝覆盖并输出 `@// ERROR: override denied` 注释。
+- 严格模式：直接失败退出并返回非零码。
+
+### 11.1.2 待确认项
+
+1. `aliases.*` 是否允许工作区层覆盖（当前建议允许）。
+2. `session.server_addr` 是否默认开启（当前建议开启但可被组织策略禁用）。
+3. `defaults.stream` 在会话层是否允许关闭（当前建议允许）。
 
 ## 12. 变更历史
 
