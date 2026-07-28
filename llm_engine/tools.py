@@ -46,6 +46,21 @@ def get_tool_definitions(tool_names):
     return tools
 
 
+def get_valid_tool_names(tool_names):
+    """返回存在于注册表中的工具名列表。"""
+    return [name for name in tool_names if name in TOOL_REGISTRY]
+
+
+def get_unknown_tool_names(tool_names):
+    """返回未注册的工具名列表。"""
+    return [name for name in tool_names if name not in TOOL_REGISTRY]
+
+
+def list_registered_tool_names():
+    """返回所有已注册工具名。"""
+    return sorted(TOOL_REGISTRY.keys())
+
+
 def execute_tool(func_name, arguments, base_dir=''):
     """执行工具并返回结果字符串"""
     executor = _EXECUTORS.get(func_name)

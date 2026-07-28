@@ -46,6 +46,9 @@ else:
 # 全局配置
 _config = None
 _verbose_mode = False
+_parse_diagnostics = {
+    'orphan_lines': [],
+}
 
 # 角色前缀定义
 _roles = {
@@ -168,10 +171,164 @@ def report_error(msg):
     sys.stderr.write(text)
     sys.stderr.flush()
 
+
+def guide(msg, level='INFO'):
+    """输出面向用户的会话内提示，始终以注释形式可见。"""
+    if msg is None:
+        return
+    prefix = '@// %s: ' % level
+    lines = str(msg).splitlines() or ['']
+    for line in lines:
+        print(prefix + line, flush=True)
+
+
+def _reset_parse_diagnostics():
+    global _parse_diagnostics
+    _parse_diagnostics = {
+        'orphan_lines': [],
+    }
+
+
+def _get_parse_diagnostics():
+    return _parse_diagnostics
+
+
+def _emit_starter_template_hint(engine_type='ollama'):
+    guide('you can start from this template and edit it:', 'HINT')
+    print("@// ---- template start ----", flush=True)
+    print("Configure: {'engine_type': '%s', 'server_addr': 'localhost', 'model': 'qwen2.5:0.5b', 'max_tokens': 1024, 'temperature': 1, 'tools': ['read', 'bash']}" % engine_type, flush=True)
+    print('System: You are a helpful assistant.', flush=True)
+    print('User: 我应该怎么做？', flush=True)
+    print('Assistant: ', flush=True)
+    print('User: ', flush=True)
+    print("@// ---- template end ----", flush=True)
+
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
     if _verbose_mode:
         debug(msg)
+
+
+def _get_session_allowed_keys(provider_spec):
+    allowed = set([
+        'engine_type',
+        'server_addr',
+        'server_port',
+        'model',
+        'temperature',
+        'max_tokens',
+        'connect_timeout',
+        'read_timeout',
+        'tools',
+        'max_tool_rounds',
+        'thinking',
+        'verbose',
+        'auth',
+        'keep_alive',
+        'stream',
+    ])
+    allowed.update(provider_spec.get('defaults', {}).keys())
+    overrides = provider_spec.get('overrides', {})
+    allowed.update(overrides.get('allowed_in_session', []))
+    return allowed
+
+
+def _warn_unknown_user_config_fields(user_config, provider_spec):
+    if not user_config or not isinstance(user_config, dict):
+        return
+
+    allowed = _get_session_allowed_keys(provider_spec)
+    unknown = sorted(key for key in user_config.keys() if key not in allowed)
+    if not unknown:
+        return
+
+    guide('unknown Configure fields ignored: %s' % ', '.join(unknown), 'WARN')
+    guide('allowed session fields: %s' % ', '.join(sorted(allowed)), 'HINT')
+
+
+def _is_model_not_found_error(message):
+    if not message:
+        return False
+    text = str(message).lower()
+    patterns = [
+        'model not found',
+        'unknown model',
+        'does not exist',
+        'no such model',
+        'failed to find model',
+        'try pulling it first',
+        'manifest unknown',
+    ]
+    if 'model' not in text:
+        return False
+    return any(pattern in text for pattern in patterns)
+
+
+def _fetch_available_models(model_query_url, headers, timeout, protocol):
+    if not model_query_url:
+        return []
+    try:
+        resp = requests.get(model_query_url, headers=headers, timeout=timeout)
+        resp.raise_for_status()
+        data = resp.json()
+        if protocol == 'ollama_native':
+            return [m['name'] for m in data.get('models', []) if isinstance(m, dict) and m.get('name')]
+        return [m['id'] for m in data.get('data', []) if isinstance(m, dict) and m.get('id')]
+    except Exception:
+        return []
+
+
+def _guide_model_suggestions(model_name, provider_runtime, timeout):
+    models = _fetch_available_models(
+        provider_runtime.get('model_query_url'),
+        provider_runtime.get('headers', {}),
+        timeout,
+        provider_runtime.get('protocol', 'openai_compat'),
+    )
+    if not models:
+        guide('model not found: %s' % model_name, 'ERROR')
+        guide('current provider does not expose a usable model list endpoint', 'HINT')
+        return
+
+    protocol = provider_runtime.get('protocol', 'openai_compat')
+    show_models = models if protocol == 'ollama_native' else models[:20]
+    guide('model not found: %s' % model_name, 'ERROR')
+    guide('server supports %d models' % len(models), 'INFO')
+    if protocol == 'ollama_native':
+        guide('available models:', 'HINT')
+        for model in show_models:
+            guide('  %s' % model, 'HINT')
+    else:
+        guide('try one of: %s' % ', '.join(show_models), 'HINT')
+    guide("Configure: {'engine_type': '%s', 'model': '%s'}" % (
+        provider_runtime.get('provider_id', 'openai_compat'),
+        show_models[0] if show_models else model_name,
+    ), 'HINT')
+
+
+def _validate_history_before_request(history):
+    """请求前校验：至少应包含一条 User 消息。"""
+    messages = history.get('messages', []) if isinstance(history, dict) else []
+    has_user = any(isinstance(msg, dict) and msg.get('role') == 'user' for msg in messages)
+
+    diagnostics = _get_parse_diagnostics()
+    orphan_lines = diagnostics.get('orphan_lines', [])
+    if orphan_lines:
+        sample = ', '.join('line %d' % ln for ln, _ in orphan_lines[:3])
+        guide('found text outside any role block (%s)' % sample, 'ERROR')
+        guide('every content line should be under System/User/Assistant/Tool/Configure role', 'HINT')
+        _emit_starter_template_hint('ollama')
+        report_error('request aborted: invalid context lines outside role blocks')
+        return False
+
+    if has_user:
+        return True
+
+    guide('no User message found in context', 'ERROR')
+    guide("write your question using a role prefix, e.g. User: 我应该怎么做？", 'HINT')
+    _emit_starter_template_hint('ollama')
+    report_error('request aborted: no User message found')
+    return False
 
 def _encode_image(image_path, base_dir=''):
     """读取图片并转为 base64"""
@@ -336,6 +493,7 @@ def _parse_input():
     - 支持 $$图片路径$$ 语法嵌入多模态内容
     """
     global _config
+    _reset_parse_diagnostics()
     history = copy.deepcopy(_config["request_template"])
     history["messages"] = []
     user_config = None
@@ -546,6 +704,8 @@ def _parse_input():
                     current_content += line
                     # 延续行只有主文件输出
                     if is_main_file:
+                        if current_role == 'none' and line.strip():
+                            _parse_diagnostics['orphan_lines'].append((line_idx + 1, line.rstrip('\n')))
                         output_line(is_main_file, line)
 
     # 所有文件处理完毕，如果主文件没有Config但有user_config，插入到开头
@@ -820,6 +980,9 @@ def answer():
     # 处理输入
     history, user_config = _parse_input()
 
+    if not _validate_history_before_request(history):
+        sys.exit(2)
+
     # 获取verbose配置（尽早获取，以便后续调试信息能正确输出）
     _verbose_mode = _get_user_config_item("verbose", False, user_config)
 
@@ -842,6 +1005,7 @@ def answer():
 
     # API请求头部（spec 负责默认认证方式）
     headers = provider_runtime['headers']
+    _warn_unknown_user_config_fields(user_config, provider_spec)
 
     # 获取超时配置
     connect_timeout = common_config.get('connect_timeout', 30)
@@ -1012,7 +1176,16 @@ def answer():
     tool_names = _get_user_config_item("tools", [], user_config)
     tool_defs = None
     if tool_names and isinstance(tool_names, list):
-        from llm_engine.tools import get_tool_definitions, execute_tool
+        from llm_engine.tools import (
+            get_tool_definitions,
+            execute_tool,
+            get_unknown_tool_names,
+            list_registered_tool_names,
+        )
+        unknown_tool_names = get_unknown_tool_names(tool_names)
+        if unknown_tool_names:
+            guide('unknown tools ignored: %s' % ', '.join(unknown_tool_names), 'WARN')
+            guide('valid tools: %s' % ', '.join(list_registered_tool_names()), 'HINT')
         tool_defs = get_tool_definitions(tool_names)
         if tool_defs:
             history["tools"] = tool_defs
@@ -1026,8 +1199,10 @@ def answer():
     resp = None
     response_completed = False
     request_failed = False
+    assistant_prefix_open = False
     try:
         print(_roles['assistant'], end='', flush=True)
+        assistant_prefix_open = True
 
         for tool_round in range(max_tool_rounds + 1):
             # 每轮请求前转换多模态消息格式
@@ -1178,16 +1353,28 @@ def answer():
         print()
     except requests.exceptions.HTTPError as e:
         request_failed = True
+        if assistant_prefix_open:
+            print('', flush=True)
+            assistant_prefix_open = False
         debug(f"{os.linesep}HTTP error occurred: {e}")
         report_error(f"HTTP error occurred: {e}")
+        if _is_model_not_found_error(e):
+            _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)
         if hasattr(e, 'response') and e.response is not None:
             try:
                 debug(f"Response body: {e.response.text[:500]}")
                 report_error(f"Response body: {e.response.text[:500]}")
+                if _is_model_not_found_error(e.response.text):
+                    _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)
+                elif provider_runtime.get('protocol') == 'ollama_native' and e.response.status_code in (400, 404):
+                    _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)
             except Exception:
                 pass
     except Exception as e:
         request_failed = True
+        if assistant_prefix_open:
+            print('', flush=True)
+            assistant_prefix_open = False
         debug(f"{os.linesep} request fail: {e}")
         report_error(f"request fail: {e}")
     finally:

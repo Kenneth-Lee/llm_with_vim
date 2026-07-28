@@ -11,6 +11,8 @@ from llm_engine.provider_spec import (
     load_provider_spec,
     resolve_provider_runtime,
 )
+from llm_engine.engine import _is_model_not_found_error
+from llm_engine.tools import get_unknown_tool_names
 
 
 def test_builtin_provider_spec_loads():
@@ -52,3 +54,15 @@ def test_unknown_provider_falls_back_to_openai_compat():
 def test_stream_default_from_provider_spec():
     runtime = resolve_provider_runtime('llama', {'stream': 'default'}, {'auth_keys': {}})
     assert runtime['runtime_config']['stream'] is False
+
+
+def test_unknown_tool_names_are_detected():
+    unknown = get_unknown_tool_names(['ok', 'bash', 'read', 'missing'])
+    assert unknown == ['ok', 'missing']
+
+
+def test_model_not_found_error_detection():
+    assert _is_model_not_found_error('model not found: glm-5.2:cloud') is True
+    assert _is_model_not_found_error('Error: failed to find model foo') is True
+    assert _is_model_not_found_error('pull model manifest: try pulling it first') is True
+    assert _is_model_not_found_error('connection refused') is False

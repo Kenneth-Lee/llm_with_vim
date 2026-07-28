@@ -10,6 +10,7 @@
 - **快速导航**: 通过F2键显示所有User查询的大纲，快速跳转
 - **便捷操作**:
   - Ctrl+Enter: 提交当前位置之前的对话给LLM
+  - F4: 打开插件快速帮助（可直接执行提交/替换/中断/大纲）
   - Shift+K: 中止正在进行的LLM生成
   - F2: 显示对话大纲
 
@@ -57,6 +58,7 @@ code --install-extension llm-with-vscode-1.0.20260129.vsix
 
 - 快捷键略有不同：
   - Vim的`jj`/`<F1>` → VSCode的`Ctrl+Enter`
+  - Vim的`<F4>`/`:LLMHelp` → VSCode的`F4` 或命令面板 `LLM: Show Help`
   - Vim的`K` → VSCode的`Shift+K`
   - Vim的`<F2>` → VSCode的`F2`
 - 使用VSCode的QuickPick显示大纲，而非独立窗口

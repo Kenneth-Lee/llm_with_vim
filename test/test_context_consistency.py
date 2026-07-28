@@ -110,3 +110,33 @@ def test_parse_input_includes_tool_role_message():
     assert len(history["messages"]) == 3
     assert history["messages"][1]["role"] == "tool"
     assert history["messages"][1]["content"] == "abc\n"
+
+
+def test_validate_history_requires_user_message():
+    assert engine._validate_history_before_request({'messages': []}) is False
+    assert engine._validate_history_before_request({
+        'messages': [{'role': 'system', 'content': 'x'}]
+    }) is False
+    assert engine._validate_history_before_request({
+        'messages': [{'role': 'user', 'content': 'x'}]
+    }) is True
+
+
+def test_orphan_lines_are_recorded_in_parse_diagnostics():
+    _prepare_min_config()
+    raw = (
+        '这是无角色文本\n'
+        'User: hi\n'
+    )
+
+    old_stdin = engine.sys.stdin
+    try:
+        engine.sys.stdin = io.StringIO(raw)
+        history, _ = engine._parse_input()
+    finally:
+        engine.sys.stdin = old_stdin
+
+    assert len(history['messages']) == 1
+    diagnostics = engine._get_parse_diagnostics()
+    assert diagnostics['orphan_lines']
+    assert diagnostics['orphan_lines'][0][0] == 1

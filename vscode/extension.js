@@ -5,6 +5,7 @@ const fs = require('fs');
 
 // 使用Map来跟踪每个文档的进程，key是文档URI
 let documentProcesses = new Map();
+let firstOpenHintShown = false;
 
 function findLLMEngine() {
     try {
@@ -297,12 +298,78 @@ async function submitQueryImpl(appendMode) {
     });
 }
 
+async function showHelpImpl(context) {
+    const items = [
+        {
+            label: '提交对话（追加模式）',
+            description: 'Ctrl+Enter',
+            detail: '保持原上下文不变，追加 Assistant 响应。',
+            action: 'append'
+        },
+        {
+            label: '提交对话（替换模式）',
+            description: 'F5',
+            detail: '重写过滤后的上下文，会清理 @// 临时注释。',
+            action: 'replace'
+        },
+        {
+            label: '停止生成',
+            description: 'Shift+K',
+            detail: '中断当前文档的进行中请求。',
+            action: 'stop'
+        },
+        {
+            label: '打开大纲',
+            description: 'F2',
+            detail: '定位到历史 User/Configure 节点。',
+            action: 'outline'
+        },
+        {
+            label: '查看扩展 README',
+            description: '详细说明',
+            detail: '打开扩展目录内 README 文档。',
+            action: 'readme'
+        }
+    ];
+
+    const picked = await vscode.window.showQuickPick(items, {
+        title: 'LLM Chat 快速帮助',
+        placeHolder: '选择一项可直接执行'
+    });
+
+    if (!picked) {
+        return;
+    }
+
+    if (picked.action === 'append') {
+        await vscode.commands.executeCommand('llm-chat.submitQuery');
+        return;
+    }
+    if (picked.action === 'replace') {
+        await vscode.commands.executeCommand('llm-chat.submitQueryReplace');
+        return;
+    }
+    if (picked.action === 'stop') {
+        await vscode.commands.executeCommand('llm-chat.stopGeneration');
+        return;
+    }
+    if (picked.action === 'outline') {
+        await vscode.commands.executeCommand('llm-chat.showOutline');
+        return;
+    }
+    if (picked.action === 'readme') {
+        const readmePath = path.join(context.extensionPath, 'README.md');
+        const doc = await vscode.workspace.openTextDocument(readmePath);
+        await vscode.window.showTextDocument(doc, { preview: false });
+    }
+}
+
 function activate(context) {
     console.log('LLM Chat Assistant extension is now active');
 
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
     statusBarItem.text = "$(comment-discussion) LLM Chat";
-    statusBarItem.tooltip = "LLM Chat Assistant 已激活";
+    statusBarItem.tooltip = "LLM Chat Assistant 已激活，按 F4 或命令面板运行 LLM: Show Help";
     context.subscriptions.push(statusBarItem);
 
     function updateStatusBar() {
@@ -317,11 +384,28 @@ function activate(context) {
     updateStatusBar();
     vscode.window.onDidChangeActiveTextEditor(updateStatusBar, null, context.subscriptions);
 
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
-        if (editor && editor.document.languageId === 'llm-chat') {
-            vscode.window.showInformationMessage('LLM Chat Assistant 已激活');
+    function showFirstOpenHint(editor) {
+        if (firstOpenHintShown) {
+            return;
         }
+        if (!editor || editor.document.languageId !== 'llm-chat') {
+            return;
+        }
+        firstOpenHintShown = true;
+        vscode.window
+            .showInformationMessage('LLM Chat 快捷提示：按 F4 可随时查看帮助与常用操作。', '打开帮助')
+            .then(selection => {
+                if (selection === '打开帮助') {
+                    vscode.commands.executeCommand('llm-chat.showHelp');
+                }
+            });
+    }
+
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+        showFirstOpenHint(editor);
     }, null, context.subscriptions);
+
+    showFirstOpenHint(vscode.window.activeTextEditor);
 
     let submitCommand = vscode.commands.registerCommand('llm-chat.submitQuery', async function () {
         await submitQueryImpl(true);
@@ -397,10 +481,15 @@ function activate(context) {
         }
     });
 
+    let helpCommand = vscode.commands.registerCommand('llm-chat.showHelp', async function () {
+        await showHelpImpl(context);
+    });
+
     context.subscriptions.push(submitCommand);
     context.subscriptions.push(submitReplaceCommand);
     context.subscriptions.push(stopCommand);
     context.subscriptions.push(outlineCommand);
+    context.subscriptions.push(helpCommand);
 }
 
 function deactivate() {

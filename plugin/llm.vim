@@ -46,6 +46,7 @@ let s:outline_bname = 'diaglog-outline.buffer'
 let s:gen_job = v:null
 let s:gen_timer = -1
 let s:gen_state = {}
+let s:first_open_hint_shown = 0
 
 " 生成是否仍在进行中（用于防止 BufWrite 在 HandleGenExit 后误设置 nomodifiable）
 let s:gen_active = 0
@@ -511,6 +512,10 @@ function! OpenDiaglogOutline()
 	execute "nmap <buffer> <F2> :q!<CR>:bd " . s:outline_bname . "<CR>"
 endfunction
 
+function! s:ShowLLMHelp()
+	echo 'LLM Help: F1/jj 追加提交 | F5/JJ 替换提交(清理@//) | K 中断 | F2 大纲 | F3 图片预览 | :help llm'
+endfunction
+
 function! s:SetupLLMBuffer()
 	" 检查环境并显示错误（如果有）
 	if !s:env_status.checked
@@ -542,6 +547,8 @@ function! s:SetupLLMBuffer()
 	nmap <buffer> <F2> :call OpenDiaglogOutline()<CR>
 	" F3: 预览图片（光标在$$...$$位置）
 	nmap <buffer> <F3> :call PreviewImage()<CR>
+	" F4: 快速帮助
+	nmap <buffer> <F4> :call <SID>ShowLLMHelp()<CR>
 	" F5: 替换模式（旧行为）：用引擎过滤后的上下文替换缓冲区
 	nmap <buffer> <F5> :call DoGenReplace()<CR>
 	" evim模式和普通模式使用不同的调用，evim也不支持jj，免得误操作
@@ -566,6 +573,11 @@ function! s:SetupLLMBuffer()
 	ab <buffer> allTools 'tools': ['read', 'write', 'edit', 'bash', 'search', 'list_dir', 'python', 'web_fetch', 'view_image']
 	setlocal spell
 	setlocal complete+=kspell
+
+	if !s:first_open_hint_shown
+		let s:first_open_hint_shown = 1
+		echo 'LLM 提示: 按 <F4> 或输入 :LLMHelp 查看快捷帮助。'
+	endif
 endfunction
 
 " 对.llm文件实现LLM的交互逻辑
@@ -573,3 +585,5 @@ augroup llm_filetype
   autocmd!
   autocmd FileType llm call s:SetupLLMBuffer()
 augroup END
+
+command! LLMHelp call <SID>ShowLLMHelp()

@@ -40,6 +40,10 @@
       {
         "command": "llm-chat.showOutline",
         "title": "LLM: Show Outline"
+      },
+      {
+        "command": "llm-chat.showHelp",
+        "title": "LLM: Show Help"
       }
     ],
     "keybindings": [
@@ -61,6 +65,11 @@
       {
         "command": "llm-chat.showOutline",
         "key": "f2",
+        "when": "editorTextFocus && editorLangId == llm-chat"
+      },
+      {
+        "command": "llm-chat.showHelp",
+        "key": "f4",
         "when": "editorTextFocus && editorLangId == llm-chat"
       }
     ],
