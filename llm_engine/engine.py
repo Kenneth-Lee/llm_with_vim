@@ -16,6 +16,7 @@ import hashlib
 import copy
 
 from llm_engine.provider_spec import (
+    apply_provider_defaults,
     get_config_root,
     get_legacy_user_config_path,
     load_json_file,
@@ -45,21 +46,6 @@ else:
 # 全局配置
 _config = None
 _verbose_mode = False
-
-# Ollama地址别名
-_ollama_addr_alias = {
-    'default': 'localhost',
-    'home': '192.168.31.100',
-    'aliyun': '47.98.228.76',
-    'txyun': '43.139.74.214',
-}
-
-# Ollama模型别名
-_ollama_model_alias = {
-    'qwen': 'qwen2.5:0.5b',
-    'llama': 'llama3.2:1b',
-    'deepseek': 'deepseek-r1:1.5b',
-}
 
 # 角色前缀定义
 _roles = {
@@ -699,7 +685,7 @@ def _emit_thinking_stream(state, chunk, final=False):
         state['buffer'] = ''
 
 
-def _stream_response(resp, engine_type, thinking_mode=False):
+def _stream_response(resp, response_mode, thinking_mode=False):
     """
     流式解析响应，实时输出文本内容，同时收集工具调用信息。
     返回 (content_text, tool_calls_list)。
@@ -711,7 +697,7 @@ def _stream_response(resp, engine_type, thinking_mode=False):
     tool_calls_acc = {}
     thinking_state = {'buffer': '', 'started': False} if thinking_mode else None
 
-    if engine_type == 'ollama':
+    if response_mode == 'json_line_ollama':
         for line in resp.iter_lines():
             if not line:
                 continue
@@ -741,7 +727,7 @@ def _stream_response(resp, engine_type, thinking_mode=False):
             except (json.JSONDecodeError, UnicodeDecodeError, KeyError):
                 continue
 
-    elif engine_type == 'haijing':
+    elif response_mode == 'raw_lines':
         for line in resp.iter_lines():
             if line:
                 try:
@@ -751,7 +737,7 @@ def _stream_response(resp, engine_type, thinking_mode=False):
                 except UnicodeDecodeError:
                     continue
 
-    elif engine_type == 'llama':
+    elif response_mode == 'json_full':
         for line in resp.iter_lines():
             if line:
                 try:
@@ -843,12 +829,15 @@ def answer():
     provider_runtime = resolve_provider_runtime(provider_id, base_config, _config, session_config=user_config)
     provider_spec = provider_runtime['spec']
     engine_type = provider_runtime['provider_id']
+    response_mode = provider_runtime['response_mode']
+    protocol = provider_runtime['protocol']
     common_config = provider_runtime['runtime_config']
     for key in common_config.keys():
         common_config[key] = _get_user_config_item(key, common_config[key], user_config)
+    common_config = apply_provider_defaults(provider_spec, common_config)
     server_addr = common_config.get('server_addr', provider_spec.get('endpoint', {}).get('default_host', 'localhost'))
     thinking_mode = _get_user_config_item("thinking", common_config.get('thinking', False), user_config)
-    if engine_type == "ollama":
+    if protocol == 'ollama_native':
         keep_alive = _get_user_config_item("keep_alive", common_config.get('keep_alive', 60), user_config)
 
     # API请求头部（spec 负责默认认证方式）
@@ -859,51 +848,7 @@ def answer():
     read_timeout = common_config.get('read_timeout', 1800)
     timeout = (connect_timeout, read_timeout)
 
-    # 根据引擎类型设置默认参数
-    if engine_type == 'haijing':
-        if common_config['model'] == '' or common_config['model'] == 'default':
-            common_config['model'] = 'DeepSeek-R1'
-        api = 'https://api.atalk-ai.com/chat/completions'
-    elif engine_type == 'deepseek':
-        if common_config['model'] == '' or common_config['model'] == 'default':
-            common_config['model'] = 'deepseek-chat'
-        api = 'https://api.deepseek.com/chat/completions'
-    elif engine_type == 'zhipu':
-        if common_config['model'] == '' or common_config['model'] == 'default':
-            common_config['model'] = 'glm-4.7'
-        api = 'https://open.bigmodel.cn/api/paas/v4/chat/completions'
-    elif engine_type == 'ali':
-        if common_config['model'] == '' or common_config['model'] == 'default':
-            common_config['model'] = 'deepseek-r1'
-        api = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
-    elif engine_type == 'llama':
-        api = 'http://' + server_addr + '/v1/chat/completions'
-    elif engine_type == 'ollama':
-        if common_config['model'] == '' or common_config['model'] == 'default':
-            common_config['model'] = 'qwen2.5:0.5b'
-        server_addr = _ollama_addr_alias.get(server_addr, server_addr)
-        common_config['model'] = _ollama_model_alias.get(
-            common_config['model'], common_config['model'])
-        api = _make_ollama_api(server_addr)
-    else:
-        # 未知引擎作为默认的 OpenAI 兼容引擎处理（支持 vLLM 等）
-        # server_addr 格式: host:port 或完整 URL
-        debug(f"使用 OpenAI 兼容引擎: {engine_type}")
-        if server_addr.startswith("http"):
-            api = server_addr.rstrip('/') + '/v1/chat/completions'
-        else:
-            api = 'http://' + server_addr + '/v1/chat/completions'
-        debug(f"API地址: {api}")
-        engine_type = 'openai_compat'
-
-    # API key处理（提前处理，以便模型查询时使用）
-    if engine_type not in ['ollama', 'llama']:
-        auth = user_config.get('auth', None) if user_config else None
-        if not auth:
-            auth_keys = _config.get("auth_keys", {})
-            auth = auth_keys.get(engine_type, '')
-        if auth:
-            headers['Authorization'] = auth
+    api = provider_runtime['api_url']
 
     # 如果 model 为 "request"，查询可用模型列表
     if common_config['model'] == 'TELLME':
@@ -914,7 +859,7 @@ def answer():
                 resp = requests.get(model_query_url, headers=headers, timeout=timeout)
                 resp.raise_for_status()
                 data = resp.json()
-                if provider_spec.get('protocol') == 'ollama_native':
+                if protocol == 'ollama_native':
                     if 'models' in data:
                         models = [m['name'] for m in data['models']]
                 elif 'data' in data:
@@ -956,7 +901,7 @@ def answer():
         user_config = common_config.copy()
         user_config["engine_type"] = engine_type
         user_config["server_addr"] = server_addr
-        if engine_type == 'ollama':
+        if protocol == 'ollama_native':
             user_config["keep_alive"] = keep_alive
         debug(f"{_roles['config']} {user_config}")
 
@@ -971,16 +916,15 @@ def answer():
     # 注意：不是所有引擎都支持，但 ollama 需要 think: false 来真正关闭 thinking
     if thinking_mode:
         history['think'] = True
-        if engine_type != 'ollama':
+        if protocol != 'ollama_native':
             history['reasoning'] = {'enabled': True}
     else:
         # 明确关闭 thinking，避免模型进行不必要的思考
         history['think'] = False
 
-    if engine_type == 'ollama':
+    if protocol == 'ollama_native':
         history["keep_alive"] = keep_alive
-    if engine_type != 'llama':
-        history["stream"] = True
+    history["stream"] = bool(common_config.get("stream", True))
 
     # 处理多模态消息格式转换
     def convert_multimodal_messages(messages, engine_type):
@@ -989,33 +933,14 @@ def answer():
         for msg in messages:
             if msg.get('role') == 'user' and 'images' in msg and msg['images']:
                 # 有图片的消息
-                if engine_type == 'ollama':
+                if protocol == 'ollama_native':
                     # Ollama 格式: content + images 数组
                     converted.append({
                         'role': msg['role'],
                         'content': msg.get('content', ''),
                         'images': msg['images']
                     })
-                elif engine_type == 'llama':
-                    # llama.cpp 格式: 使用 content 数组
-                    content_array = []
-                    if msg.get('content', '').strip():
-                        content_array.append({
-                            'type': 'text',
-                            'text': msg['content']
-                        })
-                    for img_base64 in msg['images']:
-                        content_array.append({
-                            'type': 'image_url',
-                            'image_url': {
-                                'url': f'data:image/jpeg;base64,{img_base64}'
-                            }
-                        })
-                    converted.append({
-                        'role': msg['role'],
-                        'content': content_array if len(content_array) > 1 else content_array[0]['text'] if content_array else ''
-                    })
-                elif engine_type in ['openai_compat', 'deepseek', 'zhipu', 'ali']:
+                elif protocol in ['openai_compat', 'raw_lines']:
                     # OpenAI 兼容格式
                     content_array = []
                     if msg.get('content', '').strip():
@@ -1060,7 +985,7 @@ def answer():
 
     # 检查是否包含图片但模型可能不支持
     has_images = any('images' in m for m in history.get('messages', []))
-    if has_images and engine_type not in ['ollama', 'llama', 'openai_compat']:
+    if has_images and protocol not in ['ollama_native', 'openai_compat']:
         debug(f"警告: 当前引擎 {engine_type} 可能不支持图像输入，请使用支持多模态的模型")
 
     # 输出第一个用户消息的内容，用于调试图片是否解析成功
@@ -1143,7 +1068,7 @@ def answer():
                     _active_response = resp
             resp.raise_for_status()
 
-            content, tool_calls = _stream_response(resp, engine_type, thinking_mode)
+            content, tool_calls = _stream_response(resp, response_mode, thinking_mode)
 
             if not tool_calls or not tool_defs:
                 break
@@ -1153,7 +1078,7 @@ def answer():
 
             # 将 assistant 的 tool_calls 消息加入历史
             assistant_msg = {"role": "assistant", "content": content or ""}
-            if engine_type == 'ollama':
+            if protocol == 'ollama_native':
                 # Ollama：arguments 保持 dict 格式
                 ollama_tcs = []
                 for tc in tool_calls:
@@ -1205,7 +1130,7 @@ def answer():
                     tool_msg = {"role": "tool", "content": text_result}
                     if tc.get('id'):
                         tool_msg["tool_call_id"] = tc['id']
-                    if engine_type == 'ollama':
+                    if protocol == 'ollama_native':
                         tool_msg.pop("tool_call_id", None)
                     history["messages"].append(tool_msg)
 
@@ -1233,7 +1158,7 @@ def answer():
                     tool_msg = {"role": "tool", "content": result_text}
                     if tc.get('id'):
                         tool_msg["tool_call_id"] = tc['id']
-                    if engine_type == 'ollama':
+                    if protocol == 'ollama_native':
                         tool_msg.pop("tool_call_id", None)
                     history["messages"].append(tool_msg)
 

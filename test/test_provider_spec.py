@@ -41,3 +41,14 @@ def test_api_and_model_query_url_helpers():
     runtime = {'server_addr': 'localhost', 'server_port': 80}
     assert build_api_url(spec, runtime).endswith('/v1/chat/completions')
     assert build_model_query_url(spec, runtime).endswith('/v1/models')
+
+
+def test_unknown_provider_falls_back_to_openai_compat():
+    runtime = resolve_provider_runtime('unknown_provider_name', {'model': 'default'}, {'auth_keys': {}})
+    assert runtime['provider_id'] == 'openai_compat'
+    assert runtime['response_mode'] == 'sse_openai_delta'
+
+
+def test_stream_default_from_provider_spec():
+    runtime = resolve_provider_runtime('llama', {'stream': 'default'}, {'auth_keys': {}})
+    assert runtime['runtime_config']['stream'] is False
