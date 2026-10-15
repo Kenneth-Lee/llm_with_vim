@@ -8,16 +8,16 @@
     "model": "llama3.2:1b",
     "connect_timeout": 30,
     "read_timeout": 1800,
-    "stream": false,
+    "stream": true,
     "thinking": false
   },
   "endpoint": {
-    "template": "http://{server_addr}/v1/chat/completions",
+    "template": "http://{host}:{port}/v1/chat/completions",
     "default_host": "localhost",
-    "default_port": 80
+    "default_port": 8080
   },
   "model_query": {
-    "url_template": "http://{server_addr}/v1/models"
+    "url_template": "http://{host}:{port}/v1/models"
   },
   "auth": {
     "type": "none"
@@ -26,9 +26,12 @@
     "tools": false,
     "vision": true,
     "reasoning": false,
-    "streaming": false
+    "streaming": true
   },
   "aliases": {
+    "server": {
+      "default": "localhost"
+    },
     "model": {
       "llama": "llama3.2:1b",
       "default": "llama3.2:1b"
@@ -39,19 +42,23 @@
     "model": "model",
     "temperature": "temperature",
     "max_tokens": "max_tokens",
-    "stream": "stream"
+    "stream": "stream",
+    "repeat_penalty": "repeat_penalty"
   },
   "response_mapping": {
-    "mode": "json_full",
-    "content_path": "choices[0].message.content",
-    "tool_calls_path": "choices[0].message.tool_calls"
+    "mode": "sse_openai_delta",
+    "content_path": "choices[0].delta.content",
+    "tool_calls_path": "choices[0].delta.tool_calls"
   },
   "overrides": {
     "allowed_in_session": [
       "model",
       "temperature",
       "max_tokens",
-      "server_addr"
+      "server_addr",
+      "server_port",
+      "stream",
+      "repeat_penalty"
     ],
     "readonly": [
       "protocol",

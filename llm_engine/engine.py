@@ -17,6 +17,8 @@ import copy
 
 from llm_engine.provider_spec import (
     apply_provider_defaults,
+    build_api_url,
+    build_model_query_url,
     get_config_root,
     get_legacy_user_config_path,
     load_json_file,
@@ -724,7 +726,15 @@ def _parse_input():
             try:
                 uc = json.loads(user_config)
             except json.JSONDecodeError:
-                uc = ast.literal_eval(user_config)
+                try:
+                    uc = ast.literal_eval(user_config)
+                except (ValueError, SyntaxError, MemoryError, RecursionError):
+                    # 兼容单引号 dict 混用 JSON 风格布尔/空值（true/false/null）
+                    normalized = re.sub(
+                        r'\b(true|false|null)\b',
+                        lambda m: {'true': 'True', 'false': 'False', 'null': 'None'}[m.group(1)],
+                        user_config)
+                    uc = ast.literal_eval(normalized)
 
             if not isinstance(uc, dict):
                 raise ValueError("Configuration must be a dictionary/object")
@@ -998,6 +1008,9 @@ def answer():
     for key in common_config.keys():
         common_config[key] = _get_user_config_item(key, common_config[key], user_config)
     common_config = apply_provider_defaults(provider_spec, common_config)
+    # 用户/全局配置可能修改 server_addr/server_port，重建 API URL（初始 URL 仅基于 default_config）
+    provider_runtime['api_url'] = build_api_url(provider_spec, common_config)
+    provider_runtime['model_query_url'] = build_model_query_url(provider_spec, common_config)
     server_addr = common_config.get('server_addr', provider_spec.get('endpoint', {}).get('default_host', 'localhost'))
     thinking_mode = _get_user_config_item("thinking", common_config.get('thinking', False), user_config)
     if protocol == 'ollama_native':

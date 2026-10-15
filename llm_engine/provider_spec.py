@@ -6,6 +6,7 @@ from __future__ import print_function
 import copy
 import json
 import os
+import re
 import sys
 
 _APP_NAME = 'contextforge'
@@ -193,18 +194,63 @@ def apply_provider_defaults(spec, config):
     return runtime
 
 
+def _split_host_port(raw_addr):
+    """Split 'host:port' into (host, port). Supports '[v6-addr]:port' literals."""
+    if not raw_addr or not isinstance(raw_addr, str):
+        return raw_addr, None
+    addr = raw_addr.strip()
+    if addr.startswith('['):
+        # IPv6 literal like [::1]:8080
+        end = addr.find(']')
+        if end == -1:
+            return addr, None
+        host = addr[:end + 1]
+        rest = addr[end + 1:]
+        if rest.startswith(':') and rest[1:].isdigit():
+            return host, int(rest[1:])
+        return host, None
+    if addr.count(':') == 1:
+        host, _, port_str = addr.partition(':')
+        if port_str.isdigit():
+            return host, int(port_str)
+    return addr, None
+
+
+def _format_endpoint_url(template, runtime_config, endpoint):
+    """Format an endpoint template against runtime config.
+
+    - If the template carries a ``{port}`` placeholder, ``server_addr`` may
+      still embed a port (``host:port``); it is split so the port is not
+      duplicated. Port priority: server_port config > port embedded in
+      server_addr > spec default_port.
+    - If the template has no ``{port}`` placeholder, the raw server_addr is
+      passed through unchanged so ``host:port`` keeps working (legacy
+      behaviour for {server_addr}-style templates).
+    """
+    raw_addr = runtime_config.get('server_addr') or endpoint.get('default_host', 'localhost')
+
+    if '{port}' not in template:
+        values = {'host': raw_addr, 'server_addr': raw_addr, 'port': ''}
+    else:
+        addr_host, addr_port = _split_host_port(raw_addr)
+        port = runtime_config.get('server_port') or addr_port or endpoint.get('default_port') or ''
+        values = {'host': addr_host, 'server_addr': addr_host, 'port': port}
+
+    try:
+        url = template.format(**values)
+    except Exception:
+        return template
+
+    if '{port}' in template and not values['port']:
+        # No port resolved but the template requested one: drop the dangling ':0'
+        url = re.sub(r'(://[^/:?#]+):(?:0)?(?=[/?#]|$)', r'\1', url)
+    return url
+
+
 def build_api_url(spec, runtime_config):
     endpoint = spec.get('endpoint', {})
     template = endpoint.get('template', '')
-    values = {
-        'host': runtime_config.get('server_addr') or endpoint.get('default_host', 'localhost'),
-        'server_addr': runtime_config.get('server_addr') or endpoint.get('default_host', 'localhost'),
-        'port': runtime_config.get('server_port') or endpoint.get('default_port', 0),
-    }
-    try:
-        return template.format(**values)
-    except Exception:
-        return template
+    return _format_endpoint_url(template, runtime_config, endpoint)
 
 
 def build_model_query_url(spec, runtime_config):
@@ -212,17 +258,7 @@ def build_model_query_url(spec, runtime_config):
     template = model_query.get('url_template', '')
     if not template:
         return None
-
-    endpoint = spec.get('endpoint', {})
-    values = {
-        'host': runtime_config.get('server_addr') or endpoint.get('default_host', 'localhost'),
-        'server_addr': runtime_config.get('server_addr') or endpoint.get('default_host', 'localhost'),
-        'port': runtime_config.get('server_port') or endpoint.get('default_port', 0),
-    }
-    try:
-        return template.format(**values)
-    except Exception:
-        return None
+    return _format_endpoint_url(template, runtime_config, spec.get('endpoint', {}))
 
 
 def build_auth_headers(spec, provider_id, runtime_config, global_config, session_config=None):
@@ -252,6 +288,18 @@ def resolve_provider_runtime(provider_id, base_config, global_config, session_co
         raise ValueError('Unknown provider: %s' % provider_id)
 
     runtime_config = apply_provider_defaults(spec, base_config)
+
+    # Session (per-file Configure line) server settings must affect the URL,
+    # not only authentication headers.
+    if session_config:
+        session_server = session_config.get('server_addr')
+        session_port = session_config.get('server_port')
+        if not _is_missing(session_server):
+            runtime_config['server_addr'] = session_server
+        if session_port:
+            runtime_config['server_port'] = session_port
+        # Re-apply defaults so aliases in session values get resolved too.
+        runtime_config = apply_provider_defaults(spec, runtime_config)
     protocol = spec.get('protocol', 'openai_compat')
     response_mode = spec.get('response_mapping', {}).get('mode', 'sse_openai_delta')
     api_url = build_api_url(spec, runtime_config)

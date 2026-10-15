@@ -110,7 +110,7 @@ User: 有没有其他解法？
 
 这不改变这仍是一个文本文件，你可以用所有你喜欢的vim编辑功能来编辑这个文件。你可
 以继续决定向下开辟你和LLM的未来，也可以编辑你和它交往的过往。每段这样的历史都可
-以独立存盘，独立重新使用，可以用git进行管理。
+以独立存盘，独立重新使用，可以用git进行版本管理。
 
 如果在输出的过程中需要中止请求，可以按K键（原K键功能被禁止了）。注意这里不要用
 Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任务。
@@ -129,8 +129,9 @@ Ctrl-C，Ctrl-C仍是打断当前vim操作的功能，这不会中止请求任�
 
 llm_engine默认工作在替换模式，就是你输入的上下文，它会做一些过滤会产生一些调试
 日志，替换你原来的上下文。这是llm_engine的完整功能。但这种功能在部分编辑器上面
-对长上下文的时候会影响速度，因为可能要一下提供数千甚至上万行的文本。所以我们现
-在也提供--append模式，加上这个参数，llm_engine不过滤输入，而是直接输出LLM的响应。
+上下文变得很长的时候会影响速度，因为可能要一下提供数千甚至上万行的文本。所以我
+们现在也提供--append模式，加上这个参数，llm_engine不过滤输入，而是直接输出LLM的
+响应。
 
 我们现在在vim和vscode上默认使用扩展模式，以提高显示效率，你仍可以使用全功能的替
 换模式，在vim上使用JJ输入或者F5提交请求，就是对应的模式。其他插件可以参考其他参
@@ -280,9 +281,10 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 * [llama.cpp](https://github.com/ggerganov/llama.cpp) ，参考配置：Configure:
   {'engine_type': 'llama', 'server_addr': 'localhost:8080'}
 
-* 对于任何兼容 OpenAI API 格式的服务（如 [vLLM](https://github.com/vllm-project/vllm)），
-  可以使用任意引擎名称，参考配置：Configure: {'engine_type': 'vllm',
-  'server_addr': 'localhost:8000', 'model': 'Qwen/Qwen2.5-7B-Instruct'}
+* 对于任何兼容 OpenAI API 格式的服务（如 
+  [vLLM](https://github.com/vllm-project/vllm)）或者llama-server（这个连模型的
+  名字都可以随便写），可以使用任意引擎名称，参考配置：Configure: {'engine_type':
+  'vllm', 'server_addr': 'localhost:8000', 'model': 'Qwen/Qwen2.5-7B-Instruct'}
 
 ## 已知问题
 

@@ -53,7 +53,41 @@ def test_unknown_provider_falls_back_to_openai_compat():
 
 def test_stream_default_from_provider_spec():
     runtime = resolve_provider_runtime('llama', {'stream': 'default'}, {'auth_keys': {}})
-    assert runtime['runtime_config']['stream'] is False
+    assert runtime['runtime_config']['stream'] is True
+
+
+def test_llama_default_url_uses_llama_server_port():
+    runtime = resolve_provider_runtime('llama', {}, {'auth_keys': {}})
+    assert runtime['api_url'] == 'http://localhost:8080/v1/chat/completions'
+    assert runtime['model_query_url'] == 'http://localhost:8080/v1/models'
+
+
+def test_session_server_addr_embeds_port():
+    runtime = resolve_provider_runtime(
+        'llama', {}, {'auth_keys': {}},
+        session_config={'server_addr': '127.0.0.1:9931'})
+    assert runtime['api_url'] == 'http://127.0.0.1:9931/v1/chat/completions'
+
+
+def test_session_server_port_config_wins():
+    runtime = resolve_provider_runtime(
+        'llama', {'server_addr': '127.0.0.1'}, {'auth_keys': {}},
+        session_config={'server_port': 9931})
+    assert runtime['api_url'] == 'http://127.0.0.1:9931/v1/chat/completions'
+
+
+def test_port_template_splits_embedded_port_once():
+    spec = load_provider_spec('ollama')
+    url = build_api_url(spec, {'server_addr': '192.168.31.100:11434'})
+    assert url == 'http://192.168.31.100:11434/api/chat'
+    url = build_api_url(spec, {'server_addr': 'localhost'})
+    assert url == 'http://localhost:11434/api/chat'
+
+
+def test_portless_template_keeps_host_port_passthrough():
+    spec = load_provider_spec('openai_compat')
+    url = build_api_url(spec, {'server_addr': 'localhost:8000'})
+    assert url == 'http://localhost:8000/v1/chat/completions'
 
 
 def test_unknown_tool_names_are_detected():
