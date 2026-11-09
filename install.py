@@ -143,9 +143,9 @@ def install_vim():
         os.makedirs(ftdetect_dir, exist_ok=True)
         os.makedirs(doc_dir, exist_ok=True)
 
-        src_plugin = os.path.join(SCRIPT_DIR, 'plugin', 'llm.vim')
-        src_ftdetect = os.path.join(SCRIPT_DIR, 'ftdetect', 'llm.vim')
-        src_doc = os.path.join(SCRIPT_DIR, 'doc', 'llm.txt')
+        src_plugin = os.path.join(SCRIPT_DIR, 'vim', 'plugin', 'llm.vim')
+        src_ftdetect = os.path.join(SCRIPT_DIR, 'vim', 'ftdetect', 'llm.vim')
+        src_doc = os.path.join(SCRIPT_DIR, 'vim', 'doc', 'llm.txt')
 
         if not os.path.exists(src_plugin):
             error('源文件不存在: ' + src_plugin)

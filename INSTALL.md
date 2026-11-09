@@ -47,25 +47,25 @@ pip install -e .
 #### 手动安装
 
 ```bash
-mkdir -p ~/.vim/plugin ~/.vim/ftdetect
-cp plugin/llm.vim ~/.vim/plugin/
-cp ftdetect/llm.vim ~/.vim/ftdetect/
+mkdir -p ~/.vim/plugin ~/.vim/ftdetect ~/.vim/doc
+cp vim/plugin/llm.vim ~/.vim/plugin/
+cp vim/ftdetect/llm.vim ~/.vim/ftdetect/
+cp vim/doc/llm.txt ~/.vim/doc/
+vim -c 'helptags ~/.vim/doc' -c 'qa!'   # 使 :help llm 生效
 ```
 
 #### 包管理器安装
 
 ##### Vim-Plug
-在 `~/.vimrc` 中添加：
+在 `~/.vimrc` 中添加（`rtp` 选项指定插件素材所在的子目录）：
 ```vim
-Plug 'your-username/llm_with_vim'
+Plug 'your-username/llm_with_vim', {'rtp': 'vim/'}
 ```
 
 ##### Vundle
-```vim
-Plugin 'your-username/llm_with_vim'
-```
+Vundle 不支持指定子目录，请改用上面的 Vim-Plug 或 `install.py` 安装。
 
-然后运行 `:PlugInstall` 或 `:PluginInstall`
+然后运行 `:PlugInstall`
 
 #### 目录结构说明
 
