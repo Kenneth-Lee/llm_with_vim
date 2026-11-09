@@ -48,6 +48,10 @@ else:
 # 全局配置
 _config = None
 _verbose_mode = False
+# debug 配置：False 关闭；'request' 仅打印原始请求报文；'full' 同时打印响应原始流（true 等价于 'full'）
+_debug_mode = False
+# stdout 是否停在未换行的 Assistant: 前缀上（debug 输出前需要先结束该行）
+_assistant_line_open = False
 _parse_diagnostics = {
     'orphan_lines': [],
 }
@@ -152,8 +156,12 @@ if _append_mode:
 def debug(msg, noend=False):
     """输出调试信息到stdout（作为注释）
     追加模式下不输出，避免污染编辑器缓冲区"""
+    global _assistant_line_open
     if _append_mode:
         return
+    if not noend:
+        # 本行输出会连带结束未换行的 Assistant: 前缀行
+        _assistant_line_open = False
     if (noend):
         print(f"@// {msg}", end='')
     else:
@@ -211,6 +219,277 @@ def verbose_debug(msg):
         debug(msg)
 
 
+def _resolve_debug_mode(user_config):
+    """解析 debug 配置，返回 False / 'request' / 'full'。
+
+    - False：关闭
+    - 'request'：仅打印发送给 LLM 的原始请求报文
+    - 'full'：同时打印响应的原始流与错误响应体（true/1/on 等布尔真值等价于 'full'）
+
+    优先级：环境变量 LLM_ENGINE_DEBUG > Configure 行 > 全局 config > 默认 False
+    """
+    def _normalize(value):
+        if isinstance(value, str):
+            text = value.strip().lower()
+            if text == 'request':
+                return 'request'
+            if text == 'full' or text in ('1', 'true', 'yes', 'on'):
+                return 'full'
+            return False
+        return 'full' if value else False
+
+    env_value = (os.environ.get('LLM_ENGINE_DEBUG') or '').strip()
+    if env_value:
+        return _normalize(env_value)
+
+    raw = _get_user_config_item("debug", None, user_config)
+    if raw is None:
+        raw = _config.get("default_config", {}).get("debug", False)
+    return _normalize(raw)
+
+
+def _mask_auth_headers(headers):
+    """复制 headers 并脱敏认证字段，避免密钥被写入可分享的 .llm 文件。"""
+    masked = {}
+    for key, value in (headers or {}).items():
+        text = str(value)
+        if key.lower() in ('authorization', 'api-key', 'x-api-key') and text:
+            masked[key] = text[:16] + '***' if len(text) > 16 else '***'
+        else:
+            masked[key] = value
+    return masked
+
+
+def _condense_debug_b64(value, keep=64):
+    """截断 base64 数据用于调试展示，避免撑爆输出。"""
+    if isinstance(value, str) and len(value) > keep:
+        return value[:keep] + '...(%d chars omitted)' % len(value)
+    return value
+
+
+def _condense_debug_payload(obj):
+    """递归压缩请求中的图片 base64 数据，文本内容原样保留。"""
+    if isinstance(obj, dict):
+        result = {}
+        for key, value in obj.items():
+            if key == 'images' and isinstance(value, list):
+                result[key] = [_condense_debug_b64(v) for v in value]
+            elif key == 'url' and isinstance(value, str) and value.startswith('data:'):
+                result[key] = _condense_debug_b64(value)
+            else:
+                result[key] = _condense_debug_payload(value)
+        return result
+    if isinstance(obj, list):
+        return [_condense_debug_payload(v) for v in obj]
+    return obj
+
+
+def debug_dump(msg=''):
+    """输出原始报文调试信息（显式开启 debug 配置时输出）。
+
+    与 debug() 不同：debug() 在 --append 模式下静默以避免污染编辑器缓冲区，
+    而这里是用户显式要求的调试输出，正常/追加模式下均应可见。
+    """
+    global _assistant_line_open
+    if _assistant_line_open:
+        print(flush=True)
+        _assistant_line_open = False
+    if msg:
+        print(f"@// [debug] {msg}", flush=True)
+    else:
+        print("@// [debug]", flush=True)
+
+
+def _debug_dump_request(api, headers, payload_text, payload_obj, trace_label=''):
+    """以 @// 注释形式输出一次请求的完整原始报文。"""
+    label = trace_label or 'request'
+    debug_dump(f"===== {label} request ({len(payload_text)} bytes) =====")
+    debug_dump(f"POST {api}")
+    debug_dump("headers: %s" % json.dumps(_mask_auth_headers(headers), ensure_ascii=False))
+    for line in json.dumps(_condense_debug_payload(payload_obj), ensure_ascii=False, indent=2).splitlines():
+        debug_dump(line)
+    debug_dump(f"===== end {label} request =====")
+
+
+def _debug_dump_error_body(resp, body):
+    """以 @// 注释形式输出 HTTP 错误响应的完整原始内容。"""
+    debug_dump("===== raw error response =====")
+    debug_dump(f"HTTP {resp.status_code} {resp.reason}")
+    content_type = resp.headers.get('Content-Type', '')
+    if content_type:
+        debug_dump(f"content-type: {content_type}")
+    for line in body.splitlines() or ['']:
+        if len(line) > 300:
+            line = line[:300] + '...(%d chars)' % len(line)
+        debug_dump(f"<< {line}")
+    debug_dump("===== end raw error response =====")
+
+
+def _debug_merge_top_level(result, data, skip_keys):
+    """聚合响应时合并顶层字段：跳过指定键；空值不写入（后到的有效值覆盖）。"""
+    for key, value in data.items():
+        if key in skip_keys:
+            continue
+        if value is None or value == '' or value == {} or value == []:
+            continue
+        result[key] = value
+
+
+def _aggregate_sse_debug(lines):
+    """将 OpenAI 兼容 SSE 流分片重组为等价的完整响应对象。"""
+    result = {}
+    message = {'role': 'assistant', 'content': ''}
+    content_parts = []
+    reasoning_parts = []
+    tool_calls = {}
+    parsed = 0
+
+    for text in lines:
+        if not text.startswith('data:'):
+            continue
+        payload = text.split('data:', 1)[-1].strip()
+        if payload == '[DONE]':
+            continue
+        try:
+            data = json.loads(payload)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        parsed += 1
+
+        for key in ('id', 'object', 'created', 'model'):
+            if key not in result and data.get(key) is not None:
+                result[key] = data[key]
+
+        choices = data.get('choices') or []
+        if choices and isinstance(choices[0], dict):
+            choice = choices[0]
+            delta = choice.get('delta') or {}
+            if delta.get('role'):
+                message['role'] = delta['role']
+            if isinstance(delta.get('content'), str):
+                content_parts.append(delta['content'])
+            reasoning = _parse_reasoning_delta(delta)
+            if reasoning:
+                reasoning_parts.append(reasoning)
+            for tc in delta.get('tool_calls') or []:
+                if not isinstance(tc, dict):
+                    continue
+                idx = tc.get('index', 0)
+                acc = tool_calls.setdefault(idx, {
+                    'id': '', 'type': 'function',
+                    'function': {'name': '', 'arguments': ''}})
+                if tc.get('id'):
+                    acc['id'] = tc['id']
+                func = tc.get('function') or {}
+                if func.get('name'):
+                    acc['function']['name'] += func['name']
+                if isinstance(func.get('arguments'), str):
+                    acc['function']['arguments'] += func['arguments']
+            if choice.get('finish_reason'):
+                result['finish_reason'] = choice['finish_reason']
+
+        if isinstance(data.get('usage'), dict) and data['usage']:
+            result['usage'] = data['usage']
+
+    if not parsed:
+        return None
+
+    message['content'] = ''.join(content_parts)
+    if reasoning_parts:
+        message['reasoning_content'] = ''.join(reasoning_parts)
+    if tool_calls:
+        message['tool_calls'] = [tool_calls[i] for i in sorted(tool_calls)]
+    result['message'] = message
+    return result
+
+
+def _aggregate_ollama_debug(lines):
+    """将 Ollama NDJSON 流分片重组为等价的完整响应对象（末块统计字段保留）。"""
+    result = {}
+    message = {'role': 'assistant', 'content': ''}
+    content_parts = []
+    reasoning_parts = []
+    tool_calls = None
+    parsed = 0
+
+    for text in lines:
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        parsed += 1
+
+        msg = data.get('message')
+        if isinstance(msg, dict):
+            if msg.get('role'):
+                message['role'] = msg['role']
+            if isinstance(msg.get('content'), str):
+                content_parts.append(msg['content'])
+            reasoning = _parse_reasoning_delta(msg)
+            if reasoning:
+                reasoning_parts.append(reasoning)
+            if msg.get('tool_calls'):
+                tool_calls = msg['tool_calls']
+
+        _debug_merge_top_level(result, data, skip_keys=('message',))
+
+    if not parsed:
+        return None
+
+    message['content'] = ''.join(content_parts)
+    if reasoning_parts:
+        message['reasoning_content'] = ''.join(reasoning_parts)
+    if tool_calls:
+        message['tool_calls'] = tool_calls
+    result['message'] = message
+    return result
+
+
+def _aggregate_json_full_debug(lines):
+    """将 json_full 流（每行一个完整响应对象）聚合为最终响应。"""
+    result = {}
+    content_parts = []
+    parsed = 0
+
+    for text in lines:
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if not isinstance(data, dict) or 'choices' not in data:
+            continue
+        parsed += 1
+
+        choices = data.get('choices') or []
+        if choices and isinstance(choices[0], dict):
+            msg = choices[0].get('message') or {}
+            if isinstance(msg.get('content'), str):
+                content_parts.append(msg.get('content'))
+
+        _debug_merge_top_level(result, data, skip_keys=('choices',))
+
+    if not parsed:
+        return None
+
+    result['message'] = {'role': 'assistant', 'content': ''.join(content_parts)}
+    return result
+
+
+def _aggregate_debug_response(lines, response_mode):
+    """把流式响应的原始行聚合成等价的完整响应对象；无法结构化时返回 None。"""
+    if response_mode == 'sse_openai_delta':
+        return _aggregate_sse_debug(lines)
+    if response_mode == 'json_line_ollama':
+        return _aggregate_ollama_debug(lines)
+    if response_mode == 'json_full':
+        return _aggregate_json_full_debug(lines)
+    return None
+
+
 def _get_session_allowed_keys(provider_spec):
     allowed = set([
         'engine_type',
@@ -225,6 +504,7 @@ def _get_session_allowed_keys(provider_spec):
         'max_tool_rounds',
         'thinking',
         'verbose',
+        'debug',
         'auth',
         'keep_alive',
         'stream',
@@ -417,6 +697,8 @@ def _post_stream_request(api, payload_obj, headers, timeout, trace_label=''):
     payload_hash = _sha256_text(payload_text)
     if trace_label:
         verbose_debug(f"{trace_label}.payload_hash={payload_hash}")
+    if _debug_mode:
+        _debug_dump_request(api, headers, payload_text, payload_obj, trace_label)
     resp = requests.post(
         api,
         data=payload_text.encode('utf-8'),
@@ -424,6 +706,8 @@ def _post_stream_request(api, payload_obj, headers, timeout, trace_label=''):
         stream=True,
         timeout=timeout,
     )
+    if _debug_mode:
+        debug_dump(f"{trace_label or 'request'} response: HTTP {resp.status_code}")
     return resp, payload_hash
 
 
@@ -867,8 +1151,50 @@ def _stream_response(resp, response_mode, thinking_mode=False):
     tool_calls_acc = {}
     thinking_state = {'buffer': '', 'started': False} if thinking_mode else None
 
+    # 'full' 模式下收集原始响应行，流结束（含异常中断）后聚合成完整响应一次性输出
+    debug_raw_lines = []
+    capture_raw = (_debug_mode == 'full')
+
+    def capture_debug_line(line):
+        if not capture_raw or not line:
+            return
+        try:
+            decoded = line.decode('utf-8')
+        except UnicodeDecodeError:
+            decoded = '<binary %d bytes>' % len(line)
+        debug_raw_lines.append(decoded)
+
+    def flush_debug_raw():
+        if not debug_raw_lines:
+            return
+        print()  # 结束未换行的内容输出，再打印调试信息
+        aggregated = _aggregate_debug_response(debug_raw_lines, response_mode)
+        if aggregated is not None:
+            total_bytes = sum(len(text) for text in debug_raw_lines)
+            debug_dump(f"===== response ({response_mode}, {len(debug_raw_lines)} lines, {total_bytes} bytes, aggregated) =====")
+            for text in json.dumps(aggregated, ensure_ascii=False, indent=2).splitlines():
+                debug_dump(f"<< {text}")
+            debug_dump("===== end response =====")
+        else:
+            # 无法结构化聚合（如 raw_lines 模式或非 JSON 内容），回退为逐行输出
+            debug_dump(f"===== raw response ({response_mode}, {len(debug_raw_lines)} lines) =====")
+            for decoded in debug_raw_lines:
+                if len(decoded) > 300:
+                    decoded = decoded[:300] + '...(%d chars)' % len(decoded)
+                debug_dump(f"<< {decoded}")
+            debug_dump("===== end raw response =====")
+
+    def iter_debug_lines():
+        """包裹 resp.iter_lines()：捕获原始行，并保证流结束/异常中断时输出调试信息。"""
+        try:
+            for line in resp.iter_lines():
+                capture_debug_line(line)
+                yield line
+        finally:
+            flush_debug_raw()
+
     if response_mode == 'json_line_ollama':
-        for line in resp.iter_lines():
+        for line in iter_debug_lines():
             if not line:
                 continue
             try:
@@ -898,7 +1224,7 @@ def _stream_response(resp, response_mode, thinking_mode=False):
                 continue
 
     elif response_mode == 'raw_lines':
-        for line in resp.iter_lines():
+        for line in iter_debug_lines():
             if line:
                 try:
                     decoded = line.decode('utf-8')
@@ -908,7 +1234,7 @@ def _stream_response(resp, response_mode, thinking_mode=False):
                     continue
 
     elif response_mode == 'json_full':
-        for line in resp.iter_lines():
+        for line in iter_debug_lines():
             if line:
                 try:
                     data = json.loads(line.decode('utf-8'))
@@ -926,7 +1252,7 @@ def _stream_response(resp, response_mode, thinking_mode=False):
 
     else:
         # OpenAI 兼容 SSE 格式 (deepseek, zhipu, ali, openai_compat)
-        for line in resp.iter_lines():
+        for line in iter_debug_lines():
             if not line:
                 continue
             try:
@@ -982,7 +1308,7 @@ def _stream_response(resp, response_mode, thinking_mode=False):
 
 def answer():
     """主函数：处理输入并发送给LLM"""
-    global _config, _verbose_mode
+    global _config, _verbose_mode, _debug_mode, _assistant_line_open
     _load_config()
 
     start_time = time.time()
@@ -995,6 +1321,10 @@ def answer():
 
     # 获取verbose配置（尽早获取，以便后续调试信息能正确输出）
     _verbose_mode = _get_user_config_item("verbose", False, user_config)
+    # debug 配置开启时自动启用 verbose，输出更多上下文信息
+    _debug_mode = _resolve_debug_mode(user_config)
+    if _debug_mode and not _verbose_mode:
+        _verbose_mode = True
 
     # 组合配置
     base_config = copy.deepcopy(_config['default_config'])
@@ -1083,7 +1413,7 @@ def answer():
         debug(f"{_roles['config']} {user_config}")
 
     # 根据配置完善请求记录（只导入 API 认可的请求参数）
-    _internal_keys = {'connect_timeout', 'read_timeout', 'verbose',
+    _internal_keys = {'connect_timeout', 'read_timeout', 'verbose', 'debug',
                        'tools', 'max_tool_rounds', 'thinking'}
     for key in common_config.keys():
         if key not in _internal_keys:
@@ -1182,7 +1512,7 @@ def answer():
     # 详细调试信息（需要verbose=True才输出）
     verbose_debug(f"engine_type={engine_type}")
     verbose_debug(f"api={api}")
-    verbose_debug(f"headers={headers}")
+    verbose_debug(f"headers={_mask_auth_headers(headers)}")
     verbose_debug(f"history={history}")
 
     # 工具调用配置
@@ -1216,6 +1546,7 @@ def answer():
     try:
         print(_roles['assistant'], end='', flush=True)
         assistant_prefix_open = True
+        _assistant_line_open = True
 
         for tool_round in range(max_tool_rounds + 1):
             # 每轮请求前转换多模态消息格式
@@ -1375,9 +1706,12 @@ def answer():
             _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)
         if hasattr(e, 'response') and e.response is not None:
             try:
-                debug(f"Response body: {e.response.text[:500]}")
-                report_error(f"Response body: {e.response.text[:500]}")
-                if _is_model_not_found_error(e.response.text):
+                body = e.response.text
+                if _debug_mode == 'full':
+                    _debug_dump_error_body(e.response, body)
+                debug(f"Response body: {body[:500]}")
+                report_error(f"Response body: {body[:500]}")
+                if _is_model_not_found_error(body):
                     _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)
                 elif provider_runtime.get('protocol') == 'ollama_native' and e.response.status_code in (400, 404):
                     _guide_model_suggestions(common_config.get('model', ''), provider_runtime, timeout)

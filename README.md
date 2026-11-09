@@ -261,6 +261,14 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
   和请求的一致，可以在Configure中加一个"'verbose': True"的参数，这样输出中会包
   含每次llm请求的信息，让你看看是否符合期望。
 
+* 需要看发送给LLM的原始报文时，可以在Configure中加一个"'debug': True"参数（或
+  设置环境变量LLM_ENGINE_DEBUG），引擎会把每次请求的完整JSON（URL、headers、
+  消息内容）打印出来；响应制式同样收齐后聚合成一个等价的完整响应对象一次性输出
+  （分片content拼接、tool_calls重组、保留finish_reason/usage等元数据），不再是
+  每个流式分片一行。图片base64会截断、auth密钥会脱敏。若只需要看请求不看响应，
+  可用"'debug': 'request'"减少输出。该输出在vim的追加模式下同样可见，调试完删
+  掉这些@//注释行即可（它们不会回传给LLM）。
+
 ## 当前支持的引擎
 
 * [Ollama](https://ollama.com/)，参考配置：Configure: {'engine_type': 'ollama',
