@@ -12,6 +12,11 @@ LLM with Vim/VSCode/Micro - 插件安装脚本
     python install.py --vscode  # 仅安装 VSCode 插件
     python install.py --pip     # 仅安装 pip 包
     python install.py --micro   # 仅安装 micro 插件
+    python install.py --copy    # 拷贝方式安装（默认符号链接；拷贝后与仓库解耦）
+
+默认符号链接（可编辑安装）：仓库内改动即时生效，git pull 即升级，
+但要求仓库目录保持原位不可删除。加 --copy 则全部改为拷贝（含 pip
+常规安装），安装后可移动/删除仓库，代价是仓库更新后需重新运行安装。
 """
 
 import os
@@ -44,15 +49,22 @@ def header(msg):
 
 def install_pip():
     header('安装 LLM Engine (pip)')
+    # --copy 时常规安装（不依赖本仓库）；默认 -e 可编辑安装（仓库内改代码即生效）
+    if COPY_MODE:
+        cmd = [sys.executable, '-m', 'pip', 'install', SCRIPT_DIR]
+        manual = 'pip install ' + SCRIPT_DIR
+    else:
+        cmd = [sys.executable, '-m', 'pip', 'install', '-e', SCRIPT_DIR]
+        manual = 'pip install -e ' + SCRIPT_DIR
     try:
         subprocess.check_call(
-            [sys.executable, '-m', 'pip', 'install', '-e', SCRIPT_DIR],
+            cmd,
             stdout=subprocess.DEVNULL if not VERBOSE else None
         )
-        info('pip install -e . 完成')
+        info('pip 安装完成: ' + manual)
         return True
     except subprocess.CalledProcessError:
-        error('pip install 失败，请手动运行: pip install -e ' + SCRIPT_DIR)
+        error('pip 安装失败，请手动运行: ' + manual)
         return False
     except FileNotFoundError:
         error('找不到 pip，请先安装 pip')
@@ -155,7 +167,7 @@ def install_vim():
         dst_ftdetect = os.path.join(ftdetect_dir, 'llm.vim')
         dst_doc = os.path.join(doc_dir, 'llm.txt')
 
-        # 使用符号链接（Windows 可能降级为复制）
+        # 默认符号链接（--copy 或 Windows 时为拷贝）
         _link_or_copy(src_plugin, dst_plugin)
         if os.path.exists(src_ftdetect):
             _link_or_copy(src_ftdetect, dst_ftdetect)
@@ -266,7 +278,7 @@ def install_vscode():
 
         os.makedirs(ext_dir, exist_ok=True)
 
-        # 使用符号链接
+        # 默认符号链接（--copy 或 Windows 时为拷贝）
         _link_or_copy_dir(src_dir, target_dir)
 
         info('VSCode 扩展已安装到: ' + target_dir)
@@ -347,24 +359,23 @@ def install_micro():
 # ==================== 工具函数 ====================
 
 def _link_or_copy(src, dst):
-    """创建符号链接，Windows 下降级为复制"""
+    """安装单文件：默认符号链接；--copy 或 Windows 下降级为拷贝"""
     src = os.path.abspath(src)
     if os.path.islink(dst):
         os.remove(dst)
     elif os.path.exists(dst):
         os.remove(dst)
 
-    if platform.system() == 'Windows':
+    if COPY_MODE or platform.system() == 'Windows':
         shutil.copy2(src, dst)
     else:
         os.symlink(src, dst)
 
 
 def _link_or_copy_dir(src, dst):
-    """创建目录符号链接，Windows 下降级为复制目录"""
+    """安装目录：默认目录符号链接；--copy 或 Windows 下降级为拷贝目录"""
     src = os.path.abspath(src)
-    if platform.system() == 'Windows':
-        # Windows 上复制目录内容
+    if COPY_MODE or platform.system() == 'Windows':
         if os.path.exists(dst):
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
@@ -375,7 +386,7 @@ def _link_or_copy_dir(src, dst):
 # ==================== 主函数 ====================
 
 def main():
-    global VERBOSE
+    global VERBOSE, COPY_MODE
     parser = argparse.ArgumentParser(
         description='LLM with Vim/VSCode 插件安装脚本')
     parser.add_argument('--vim', action='store_true',
@@ -386,6 +397,9 @@ def main():
                         help='仅安装 pip 包')
     parser.add_argument('--micro', action='store_true',
                         help='仅安装 micro 插件')
+    parser.add_argument('--copy', action='store_true',
+                        help='以拷贝方式安装（默认符号链接；拷贝后与仓库解耦，'
+                             '仓库更新后需重新运行安装）')
     parser.add_argument('--no-pip', action='store_true',
                         help='跳过 pip 安装')
     parser.add_argument('-v', '--verbose', action='store_true',
@@ -393,10 +407,12 @@ def main():
     args = parser.parse_args()
 
     VERBOSE = args.verbose
+    COPY_MODE = args.copy
     specific = args.vim or args.vscode or args.pip or args.micro
 
     print('LLM with Vim/VSCode/Micro 安装脚本')
     print('系统: %s (%s)' % (platform.system(), platform.machine()))
+    print('安装方式: %s' % ('拷贝（--copy）' if args.copy else '符号链接（可编辑）'))
 
     results = []
 
@@ -429,6 +445,7 @@ def main():
 
 
 VERBOSE = False
+COPY_MODE = False
 
 if __name__ == '__main__':
     main()

@@ -23,6 +23,15 @@ python install.py --micro    # 仅安装 micro 插件
 python install.py --pip      # 仅安装 pip 包
 ```
 
+默认以**符号链接**方式安装（可编辑安装）：仓库内改动即时生效，
+`git pull` 即升级，但要求仓库目录保持原位不可删除。
+如果希望安装后与仓库解耦（可移动或删除仓库目录），加 `--copy` 以拷贝
+方式安装（同时 pip 改为常规安装）：
+```bash
+python install.py --copy           # 全部组件拷贝安装
+python install.py --copy --vim     # 仅 Vim 插件拷贝安装
+```
+
 支持 Linux、macOS 和 Windows
 
 ## 独立安装
