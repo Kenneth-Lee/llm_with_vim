@@ -3,7 +3,6 @@ __pycache__
 *.swp
 测试上下文
 AGENTS.md
-CLAUDE.md
 *.egg-info
 dist/
 build/
