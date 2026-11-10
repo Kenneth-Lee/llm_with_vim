@@ -17,7 +17,7 @@
     "default_port": 443
   },
   "model_query": {
-    "url_template": ""
+    "url_template": "https://api.atalk-ai.com/v1/models"
   },
   "auth": {
     "type": "header",

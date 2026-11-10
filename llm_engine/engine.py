@@ -110,16 +110,32 @@ def _load_config():
             print("Error loading default config: %s" % default_path, file=sys.stderr)
             sys.exit(1)
 
-        # 先加载旧配置，再加载新配置目录，最后允许显式环境变量覆盖
-        user_config_paths = [
-            get_legacy_user_config_path(),
-            os.path.join(get_config_root(), 'config.json'),
-        ]
+        # 旧配置自动迁移：新配置不存在且未用环境变量显式指定时，拷贝旧配置到新路径
+        # 迁移失败不覆盖任何文件，继续按旧路径读取（见 docs/contextforge_architecture_design.md 7.2）
         env_config_path = os.environ.get('LLM_ENGINE_CONFIG')
         if env_config_path:
             env_config_path = os.path.expanduser(env_config_path)
-            if env_config_path not in user_config_paths:
-                user_config_paths.append(env_config_path)
+        legacy_path = get_legacy_user_config_path()
+        new_path = os.path.join(get_config_root(), 'config.json')
+        if (os.path.isfile(legacy_path) and not os.path.isfile(new_path)
+                and not env_config_path):
+            try:
+                if not os.path.isdir(get_config_root()):
+                    os.makedirs(get_config_root())
+                with open(legacy_path, 'rb') as src, open(new_path, 'wb') as dst:
+                    dst.write(src.read())
+                print("@// 已自动迁移旧配置到 %s（原文件 %s 保留，确认无误后可删除）"
+                      % (new_path, legacy_path))
+            except Exception as e:
+                print("@// 旧配置自动迁移失败(%s)，继续直接读取旧路径" % e, file=sys.stderr)
+
+        # 先加载旧配置，再加载新配置目录，最后允许显式环境变量覆盖
+        user_config_paths = [
+            legacy_path,
+            new_path,
+        ]
+        if env_config_path and env_config_path not in user_config_paths:
+            user_config_paths.append(env_config_path)
 
         for user_config_path in user_config_paths:
             if os.path.isfile(user_config_path):
@@ -139,13 +155,6 @@ def _deep_merge(base, override):
             _deep_merge(base[key], value)
         else:
             base[key] = value
-
-def _make_ollama_api(host, api='chat'):
-    """构建Ollama API地址"""
-    if host.startswith("http"):
-        return host + api
-    else:
-        return 'http://' + host + ':11434/api/' + api
 
 # 追加模式（跳过上下文重新输出，直接接收LLM响应）
 _append_mode = '--append' in sys.argv
@@ -600,26 +609,27 @@ def _is_model_not_found_error(message):
 
 
 def _fetch_available_models(model_query_url, headers, timeout, protocol):
+    """查询服务器可用模型列表；model_query_url 缺失时返回空列表，其它异常直接抛出由调用方处理。"""
     if not model_query_url:
         return []
-    try:
-        resp = requests.get(model_query_url, headers=headers, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        if protocol == 'ollama_native':
-            return [m['name'] for m in data.get('models', []) if isinstance(m, dict) and m.get('name')]
-        return [m['id'] for m in data.get('data', []) if isinstance(m, dict) and m.get('id')]
-    except Exception:
-        return []
+    resp = requests.get(model_query_url, headers=headers, timeout=timeout)
+    resp.raise_for_status()
+    data = resp.json()
+    if protocol == 'ollama_native':
+        return [m['name'] for m in data.get('models', []) if isinstance(m, dict) and m.get('name')]
+    return [m['id'] for m in data.get('data', []) if isinstance(m, dict) and m.get('id')]
 
 
 def _guide_model_suggestions(model_name, provider_runtime, timeout):
-    models = _fetch_available_models(
-        provider_runtime.get('model_query_url'),
-        provider_runtime.get('headers', {}),
-        timeout,
-        provider_runtime.get('protocol', 'openai_compat'),
-    )
+    try:
+        models = _fetch_available_models(
+            provider_runtime.get('model_query_url'),
+            provider_runtime.get('headers', {}),
+            timeout,
+            provider_runtime.get('protocol', 'openai_compat'),
+        )
+    except Exception:
+        models = []
     if not models:
         guide('model not found: %s' % model_name, 'ERROR')
         guide('current provider does not expose a usable model list endpoint', 'HINT')
@@ -1415,39 +1425,11 @@ def answer():
 
     api = provider_runtime['api_url']
 
-    # 如果 model 为 "request"，查询可用模型列表
+    # 如果 model 为 "TELLME"，查询可用模型列表（endpoint 由 provider 描述的 model_query 决定）
     if common_config['model'] == 'TELLME':
-        models = []
         try:
-            model_query_url = provider_runtime.get('model_query_url')
-            if model_query_url:
-                resp = requests.get(model_query_url, headers=headers, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-                if protocol == 'ollama_native':
-                    if 'models' in data:
-                        models = [m['name'] for m in data['models']]
-                elif 'data' in data:
-                    models = [m['id'] for m in data['data']]
-            elif engine_type == 'ollama':
-                # Ollama 使用 /api/tags 查询模型
-                tags_api = _make_ollama_api(server_addr, 'tags')
-                resp = requests.get(tags_api, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-                if 'models' in data:
-                    models = [m['name'] for m in data['models']]
-            elif engine_type in ['openai_compat', 'llama']:
-                # OpenAI 兼容引擎使用 /v1/models 查询模型
-                models_api = api.rsplit('/', 2)[0] + '/v1/models'
-                req_headers = {}
-                if 'Authorization' in headers:
-                    req_headers['Authorization'] = headers['Authorization']
-                resp = requests.get(models_api, headers=req_headers, timeout=timeout)
-                resp.raise_for_status()
-                data = resp.json()
-                if 'data' in data:
-                    models = [m['id'] for m in data['data']]
+            models = _fetch_available_models(
+                provider_runtime.get('model_query_url'), headers, timeout, protocol)
         except Exception as e:
             print(f"@// 查询模型失败: {e}")
             sys.exit(0)
@@ -1550,7 +1532,7 @@ def answer():
 
     # 检查是否包含图片但模型可能不支持
     has_images = any('images' in m for m in history.get('messages', []))
-    if has_images and protocol not in ['ollama_native', 'openai_compat']:
+    if has_images and not provider_spec.get('features', {}).get('vision', False):
         debug(f"警告: 当前引擎 {engine_type} 可能不支持图像输入，请使用支持多模态的模型")
 
     # 输出第一个用户消息的内容，用于调试图片是否解析成功

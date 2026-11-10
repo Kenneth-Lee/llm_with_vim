@@ -9,6 +9,10 @@ let firstOpenHintShown = false;
 
 function findLLMEngine() {
     try {
+        execFileSync('contextforge', ['--help'], { stdio: 'ignore', timeout: 3000 });
+        return { cmd: 'contextforge', args: [] };
+    } catch (e) {}
+    try {
         execFileSync('llm_engine', ['--help'], { stdio: 'ignore', timeout: 3000 });
         return { cmd: 'llm_engine', args: [] };
     } catch (e) {}

@@ -42,16 +42,17 @@
 
 这里主要介绍原理。
 
-我们的应用的主体是一个python程序，`llm_engine`。如果你本地已经安装了ollama，简
+我们的应用的主体是一个python程序，命令名为 `contextforge`（旧名 `llm_engine` /
+`llm-engine` 仍可用，是同一个程序的过渡别名）。如果你本地已经安装了ollama，简
 单的用法是这样：
 ```bash
-echo "User: hello" | llm_engine
+echo "User: hello" | contextforge
 ```
 或者
 ```bash
-llm_engine < chat.llm
+contextforge < chat.llm
 ```
-这个llm_engine程序的使用方式就是把你输入的对话提交给LLM，然后把对话本身，以及
+这个程序的使用方式就是把你输入的对话提交给LLM，然后把对话本身，以及
 LLM的回答，一起返回给你。
 
 当然，这种用法并不方便，我们设计的使用方式是通过插件来调用这个命令，这样，你一
@@ -204,7 +205,8 @@ User/System/Assistant都是LLM或者人说的话，所以是自然语言的。�
 本地之外的模型通常需要配置apikey，模板中通常只有一个占位符，需要自己修改成你自
 己的API key。如果你不想每个llm文件都出现这个信息，也可以写到用户目录配置中：
 `~/.config/contextforge/config.json`（新路径，推荐）。
-当前仍兼容旧路径 `~/.config/llm_engine/llm_engine.json`。
+当前仍兼容旧路径 `~/.config/llm_engine/llm_engine.json`：首次运行时会自动把
+旧配置迁移到新路径并在输出中提示（原文件保留，确认无误后可删除）。
 
 引擎名、服务器地址和模型名都支持别名，比如 server_addr 写 'default' 会解析为
 localhost，model 写 'qwen' 会解析为 'qwen2.5:0.5b'。可用别名定义在各引擎的
@@ -235,9 +237,9 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 
 ### 全局配置
 
-除了通过单个llm文件配置单个会话的参数，llm\_engine也可以通过独立配置文件进行全
-局配置（推荐 `~/.config/contextforge/config.json`，兼容旧文件
-`~/.config/llm_engine/llm_engine.json`），这些配置分三层：
+除了通过单个llm文件配置单个会话的参数，contextforge也可以通过独立配置文件进行全
+局配置（推荐 `~/.config/contextforge/config.json`，旧文件
+`~/.config/llm_engine/llm_engine.json` 会被自动迁移），这些配置分三层：
 
 * 默认配置：这个内嵌在llm\_engine的模块目录中
 * 用户配置：推荐放在$HOME/.config/contextforge/config.json，兼容旧目录

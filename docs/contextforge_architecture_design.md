@@ -473,18 +473,23 @@ response_mapping.mode = json_line_ollama (source: L0 readonly, override denied a
 4. Phase D: 收口
 - 删除旧分支、保留兼容解析与迁移器。
 
-### 7.2 配置迁移
+### 7.2 配置迁移（已实施）
 
 - 启动时检查旧配置文件。
-- 自动迁移至 `~/.config/contextforge/`。
-- 迁移失败不覆盖，输出可恢复提示。
+- 自动迁移至 `~/.config/contextforge/`：仅当新配置不存在且未用 `LLM_ENGINE_CONFIG`
+  显式指定时，拷贝旧文件到新路径，并在输出中提示；原文件保留。
+- 迁移失败不覆盖任何文件，回退到直接读旧路径（行为与迁移前一致）。
+- 安装器 `install.py` 已改为直接安装到新路径。
 
-### 7.3 CLI 与命名迁移
+### 7.3 CLI 与命名迁移（已实施）
 
-建议保留过渡期别名：
+保留过渡期别名：
 
-- 新命令：`contextforge`
-- 过渡别名：`llm_engine`（打印 deprecation 提示）
+- 新命令：`contextforge`（`pyproject.toml` 首选入口）
+- 过渡别名：`llm_engine`、`llm-engine`（同一入口，不打印 deprecation 提示：编辑器
+  集成每次提交都调用引擎，运行时提示会成为噪音，改由文档标注过渡状态）
+- 三个编辑器集成（vim/vscode/micro）查找引擎时均优先 `contextforge`，找不到时回退旧名
+- Python 包名 `llm_engine` 保持不变，`python -m llm_engine` 继续可用
 
 ## 8. 一致性与缓存命中策略
 
@@ -593,3 +598,5 @@ response_mapping.mode = json_line_ollama (source: L0 readonly, override denied a
 | 日期 | 变更内容 | 原因 |
 |---|---|---|
 | 2026-07-28 | 创建 ContextForge 总体架构设计与 Schema v1 草案 | 支撑 Provider 抽象重构讨论 |
+| 2026-11-10 | Phase D 收尾：删除 TELLME 模型查询的引擎名 fallback（统一走 model_query）与 _make_ollama_api；图像警告改由描述的 features.vision 驱动；haijing 补充 model_query | 主流程不再出现按引擎名的分支 |
+| 2026-11-10 | 实施 7.2 配置自动迁移与 7.3 CLI 命名：新增 contextforge 入口（编辑器集成优先使用），旧配置自动迁移，install.py 改写新路径 | 命名统一收口，降低迁移摩擦 |

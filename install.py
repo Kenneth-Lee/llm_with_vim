@@ -74,14 +74,16 @@ def install_pip():
 # ==================== 配置文件 ====================
 
 def install_config():
-    """安装用户配置文件到 ~/.config/llm_engine/"""
+    """安装用户配置文件到 ~/.config/contextforge/"""
     system = platform.system()
     if system == 'Windows':
-        config_dir = os.path.join(os.environ.get('APPDATA', ''), 'llm_engine')
+        config_dir = os.path.join(os.environ.get('APPDATA', ''), 'contextforge')
     else:
-        config_dir = os.path.expanduser('~/.config/llm_engine')
+        xdg = os.environ.get('XDG_CONFIG_HOME')
+        config_dir = (os.path.expanduser(xdg) if xdg
+                      else os.path.expanduser('~/.config')) + '/contextforge'
 
-    config_file = os.path.join(config_dir, 'llm_engine.json')
+    config_file = os.path.join(config_dir, 'config.json')
     src = os.path.join(SCRIPT_DIR, 'llm_engine', 'default_config.json')
 
     if os.path.exists(config_file):

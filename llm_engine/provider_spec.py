@@ -68,7 +68,9 @@ def get_legacy_config_root():
     if sys.platform == 'win32':
         base = os.environ.get('APPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
         return os.path.join(base, _LEGACY_APP_NAME)
-    return os.path.join(os.path.expanduser('~'), '.config', _LEGACY_APP_NAME)
+
+    base = os.environ.get('XDG_CONFIG_HOME') or os.path.join(os.path.expanduser('~'), '.config')
+    return os.path.join(base, _LEGACY_APP_NAME)
 
 
 def get_user_config_path():
