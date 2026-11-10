@@ -139,8 +139,14 @@ llm_engine默认工作在替换模式，就是你输入的上下文，它会做�
 
 ### 引用图片和调用工具
 
-如果LLM支持，对话中可以引用本地图片和调用工具。其中引用本地图片的方法是在上下文
-中增加“$$图片本地路径$$”这样的描述，代理会把图片附加到这个角色的发言中。
+如果LLM支持（即模型具备视觉能力），对话中可以引用本地图片和调用工具。其中引用
+本地图片的方法是在上下文中增加“$$图片本地路径$$”这样的描述，代理会把图片附加
+到这个角色的发言中。细节：
+
+* 语法仅在 User 角色的发言中生效，其他角色中出现同样的记号不会被解释
+* 相对路径基于 llm 文件所在目录（由编辑器插件自动传入）解析
+* 提交时引用处会替换为“[IMAGE:路径]”占位符一并发给 LLM；如果文件不存在，
+  占位符变为“[IMAGE_NOT_FOUND:路径]”，从提交结果中可以直接看出来
 
 工具是个全局的概念，这可以在Configure角色中告知LLM有那些工具可用。像这样：
 ```
@@ -200,6 +206,11 @@ User/System/Assistant都是LLM或者人说的话，所以是自然语言的。�
 `~/.config/contextforge/config.json`（新路径，推荐）。
 当前仍兼容旧路径 `~/.config/llm_engine/llm_engine.json`。
 
+引擎名、服务器地址和模型名都支持别名，比如 server_addr 写 'default' 会解析为
+localhost，model 写 'qwen' 会解析为 'qwen2.5:0.5b'。可用别名定义在各引擎的
+provider 描述文件中（见下文“自定义引擎”），你也可以在描述文件里增加自己的
+别名。
+
 ### 其他辅助语法
 
 llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这包括：
@@ -215,8 +226,8 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 * 长久注释：@## 开头的语句被看作长久注释，这种语句也会被llm\_engine忽略。这个地方
   有个风险是：如果AI返回的语句中也有这样的行，也会被忽略。
 
-* 引用图片：在支持图片的请求中，可以通过@image_path@的形式引用图片，图片会被编
-  码到请求消息中。
+* 引用图片：语法为 `$$图片路径$$`，仅在 User 角色发言中生效，详见前文
+  “引用图片和调用工具”一节。
 
 这些辅助语法最大的风险是如果角色也有一样的输出，可能导致llm\_engine误解释，我们
 已经尽量使用比较特殊的符号组合了，但不能保证LLM会怎么返回，所以，只能请你自行注
@@ -249,6 +260,14 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 }
 ```
 
+### 环境变量
+
+* `LLM_ENGINE_CONFIG`：指定用户配置文件的完整路径（默认
+  `~/.config/contextforge/config.json`）
+* `LLM_ENGINE_DEBUG`：等价于 Configure 里写 `'debug': True`
+* `LLM_FILE_DIR`：工具和图片的相对路径基准目录，编辑器插件会自动设置为当前
+  llm 文件所在目录
+* `LLM_FILE_ENCODING`：重设标准流编码（主要供 Windows 使用，默认 utf-8）
 
 ## 一些技巧
 
@@ -296,9 +315,21 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
   {'engine_type': 'llama', 'server_addr': 'localhost:8080'}
 
 * 对于任何兼容 OpenAI API 格式的服务（如 
-  [vLLM](https://github.com/vllm-project/vllm)）或者llama-server（这个连模型的
+  [vLLM](https://github.com/vllm-project/vllm))或者llama-server（这个连模型的
   名字都可以随便写），可以使用任意引擎名称，参考配置：Configure: {'engine_type':
   'vllm', 'server_addr': 'localhost:8000', 'model': 'Qwen/Qwen2.5-7B-Instruct'}
+
+### 自定义引擎
+
+每个引擎的行为由一个 JSON 描述文件（provider 描述）驱动，内置描述在
+`llm_engine/providers/` 目录（ollama、deepseek、zhipu、ali、haijing、llama、
+openai\_compat）。上条“任意引擎名称”的原理就是：引擎不认识这个名字时，自动回
+退到 openai\_compat 描述用 OpenAI 协议访问。
+
+你也可以增加自己的引擎：拷贝一份内置描述到 `~/.config/contextforge/providers/`
+下修改（服务地址、默认模型、鉴权方式、模型查询地址、别名等都是字段化的），文件
+名即引擎名，用户描述会覆盖同名的内置描述。字段含义和设计思路参考
+[ContextForge架构设计](docs/contextforge_architecture_design.md)。
 
 ## 已知问题
 
