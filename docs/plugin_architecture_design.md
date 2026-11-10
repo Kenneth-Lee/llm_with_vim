@@ -70,9 +70,11 @@ CFPlugin.lookup("plugin_name")找到这种插件的列表，根据具体使用�
 ```
 
 **插件文件（py 模块）**一个插件一个文件，身份由文件内的接口类子类携带：
-service（注册到哪个服务）、name（服务内唯一名）、description 与 parameters
-（给 LLM 看的声明，工具类插件即工具定义）。文件被导入时执行模块级代码完成注册，
-因此“插件存在”这件事不需要在任何集中清单里重复声明。
+service（注册到哪个服务）、name（服务内唯一名，即 Configure tools 列表中的
+名字）、description 与 parameters（给 LLM 看的声明，工具类插件即工具定义）。
+工具类插件另有 func_name（LLM 调用时的函数名，缺省与 name 相同），保留两级
+命名是为了兼容既有会话记录中的工具名（如 read 与 read_file）。文件被导入时执行
+模块级代码完成注册，因此“插件存在”这件事不需要在任何集中清单里重复声明。
 
 **插件注册表（CFPlugin）**是运行期唯一的插件索引，两级结构：
 `{服务名: {插件名: 接口类实例}}`。它只回答“有什么服务、每个服务有哪些实现”，
@@ -91,13 +93,15 @@ from llm_engine.plugin_loader import CFPlugin, CFP_Tool
 class ReadTool(CFP_Tool):
     service = 'tool'
     name = 'read'
+    func_name = 'read_file'   # LLM 调用时的函数名，缺省与 name 相同
     description = '读取文件内容'
-    parameters = {...}          # JSON schema，形态同 tool_definitions.json 现有条目
+    parameters = {...}          # JSON schema，形态同原 tool_definitions.json 条目
 
     def execute(self, arguments, context):
         """执行工具动作。arguments 为 LLM 给出的参数 dict，context 提供运行环境
-        （base_dir 等朴素数据）。返回 {'result': str}；失败时抛 PluginError，
-        消息作为工具结果回给 LLM。"""
+        （base_dir 等朴素数据）。返回结果字符串，或带标记的 dict（view_image 的
+        图片结果，engine.py 会识别）；失败时返回错误串或直接抛 PluginError，
+        两种方式都会作为工具结果回给 LLM。"""
 
 CFPlugin.register(ReadTool)
 ```
@@ -124,9 +128,10 @@ CFPlugin.lookup(service, name) -> 插件实例
 ```
 
 现有对外接口保持不变：tools.py 保留 `get_tool_definitions(tool_names)`、
-`get_valid_tool_names(tool_names)`、`execute_tool(func_name, arguments, base_dir)`
-三个函数，签名与语义不变，内部改为从注册表取数据与分发；engine.py 的调用点零
-改动。
+`get_valid_tool_names(tool_names)`、`get_unknown_tool_names(tool_names)`、
+`list_registered_tool_names()`、`execute_tool(func_name, arguments, base_dir)`
+五个函数，签名与语义不变，内部改为从注册表取数据与分发；execute_tool 同时接受
+LLM 调用名（read_file）与 Configure 工具名（read）；engine.py 的调用点零改动。
 
 整个调用链总结：进程启动时 load_plugins 按选择清单导入插件文件，文件执行时自注册
 进 CFPlugin；Configure 行的 tools 列表决定本会话向 LLM 声明哪些工具；LLM 发起
@@ -140,3 +145,4 @@ CFPlugin.lookup(service, name) -> 插件实例
 |---|---|---|
 | 2026-11-09 | 创建插件化架构设计 | 落实“插件只在多选位置”的架构结论，收口引擎 spec 化遗留分支 |
 | 2026-11-10 | 按选择清单加自注册模型重写核心数据结构与接口，去除 setup/teardown | 评审确认 plugins.json 为加载选择清单，注册由插件文件自声明；引擎收口内容移回 ContextForge 文档 |
+| 2026-11-10 | 完成工具子系统插件化实现 | 新增 plugin_loader 与九个工具插件，tools.py 变为门面，删除 tool_definitions.json；补记 func_name 两级命名与 execute 返回契约 |

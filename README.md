@@ -162,8 +162,11 @@ User: 请读取 /etc/hostname 并告诉我这台机器的名称
 | web\_fetch | 获取网页文本内容 |
 | view\_image | 查看图片 |
 
-工具定义存放在 `llm_engine/tool_definitions.json` 中。通过`max_tool_rounds`（默
-认10）可以控制单次对话中工具调用的最大轮数。
+每个工具是 `llm_engine/plugins/tools/` 下的一个插件文件，由
+`llm_engine/plugins/plugins.json` 清单选择加载；用户也可在
+`~/.config/contextforge/plugins.json` 清单中登记自己的工具插件或排除内置工具
+（详见 `docs/plugin_architecture_design.md`）。通过`max_tool_rounds`（默认10）可以
+控制单次对话中工具调用的最大轮数。
 
 在`vim插件`中，`allTools`缩写会展开成所有工具的配置，可以用这种方法建立工具的基
 础配置模板。

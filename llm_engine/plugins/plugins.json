@@ -1,0 +1,13 @@
+{
+    "load": [
+        "tools/read.py",
+        "tools/write.py",
+        "tools/edit.py",
+        "tools/bash.py",
+        "tools/search.py",
+        "tools/list_dir.py",
+        "tools/python.py",
+        "tools/web_fetch.py",
+        "tools/view_image.py"
+    ]
+}
