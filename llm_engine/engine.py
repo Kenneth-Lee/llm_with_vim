@@ -203,15 +203,68 @@ def _get_parse_diagnostics():
     return _parse_diagnostics
 
 
-def _emit_starter_template_hint(engine_type='ollama'):
+def _emit_starter_template_hint(engine_type='ollama', user_config=None):
     guide('you can start from this template and edit it:', 'HINT')
     print("@// ---- template start ----", flush=True)
-    print("Configure: {'engine_type': '%s', 'server_addr': 'localhost', 'model': 'qwen2.5:0.5b', 'max_tokens': 1024, 'temperature': 1, 'tools': ['read', 'bash']}" % engine_type, flush=True)
+    # 模板用当前生效配置生成，而不是硬编码示例：用户全局配置了什么就展示什么
+    engine_type = _get_user_config_item("engine_type", engine_type, user_config)
+    server_addr = _get_user_config_item("server_addr", "localhost", user_config)
+    model = _get_user_config_item("model", "qwen2.5:0.5b", user_config)
+    print("Configure: {'engine_type': '%s', 'server_addr': '%s', 'model': '%s', 'max_tokens': 1024, 'temperature': 1}" % (engine_type, server_addr, model), flush=True)
     print('System: You are a helpful assistant.', flush=True)
     print('User: 我应该怎么做？', flush=True)
     print('Assistant: ', flush=True)
     print('User: ', flush=True)
     print("@// ---- template end ----", flush=True)
+    print("@// 想知道有哪些引擎、工具和当前生效配置？把 engine_type 设为 'TELLME' 再提交一次", flush=True)
+
+
+_TELLME_CONFIG_KEYS = (
+    'engine_type', 'server_addr', 'model', 'max_tokens', 'temperature',
+    'repeat_penalty', 'top_p', 'keep_alive', 'thinking', 'stream',
+    'max_tool_rounds', 'auth',
+)
+
+
+def _mask_secret(value):
+    text = str(value)
+    if len(text) <= 8:
+        return '***'
+    return text[:8] + '***'
+
+
+def _emit_tellme_environment(user_config):
+    """engine_type=TELLME 时的环境信息输出：纯本地查询，不访问网络。"""
+    from llm_engine.provider_spec import (
+        list_provider_specs, get_user_provider_dir)
+    from llm_engine.tools import list_registered_tool_names
+
+    print("@// === ContextForge 环境信息 ===", flush=True)
+    print("@// 可用引擎（内置 + 用户目录 %s）：" % get_user_provider_dir(), flush=True)
+    for spec in list_provider_specs():
+        provider_id = spec.get('id', '?')
+        display_name = spec.get('display_name', provider_id)
+        auth_type = spec.get('auth', {}).get('type', 'none')
+        auth_desc = ('免鉴权' if auth_type in (None, '', 'none')
+                     else '需%s' % auth_type)
+        default_model = spec.get('defaults', {}).get('model', '')
+        line = "@//   %-14s %-20s %-8s" % (provider_id, display_name, auth_desc)
+        if default_model:
+            line += "  默认模型 %s" % default_model
+        print(line, flush=True)
+    print("@// 可用工具：%s" % ' '.join(list_registered_tool_names()), flush=True)
+    print("@//   （把工具名写进 Configure 的 tools 列表即启用）", flush=True)
+    print("@// 当前生效配置（默认+用户+本文件三层合并）：", flush=True)
+    for key in _TELLME_CONFIG_KEYS:
+        default = 'ollama' if key == 'engine_type' else None
+        value = _get_user_config_item(key, default, user_config)
+        if value is None:
+            continue
+        if key in ('auth', 'api_key'):
+            value = _mask_secret(value)
+        print("@//   %s = %s" % (key, value), flush=True)
+    print("@// 想知道服务器上有什么模型？把 model 设为 'TELLME' 再提交一次", flush=True)
+    print("@// 配置说明见 README.md 的 Configure 与全局配置两节", flush=True)
 
 def verbose_debug(msg):
     """输出详细调试信息（需要verbose=True才输出）"""
@@ -588,7 +641,7 @@ def _guide_model_suggestions(model_name, provider_runtime, timeout):
     ), 'HINT')
 
 
-def _validate_history_before_request(history):
+def _validate_history_before_request(history, user_config=None):
     """请求前校验：至少应包含一条 User 消息。"""
     messages = history.get('messages', []) if isinstance(history, dict) else []
     has_user = any(isinstance(msg, dict) and msg.get('role') == 'user' for msg in messages)
@@ -599,7 +652,7 @@ def _validate_history_before_request(history):
         sample = ', '.join('line %d' % ln for ln, _ in orphan_lines[:3])
         guide('found text outside any role block (%s)' % sample, 'ERROR')
         guide('every content line should be under System/User/Assistant/Tool/Configure role', 'HINT')
-        _emit_starter_template_hint('ollama')
+        _emit_starter_template_hint('ollama', user_config)
         report_error('request aborted: invalid context lines outside role blocks')
         return False
 
@@ -608,7 +661,7 @@ def _validate_history_before_request(history):
 
     guide('no User message found in context', 'ERROR')
     guide("write your question using a role prefix, e.g. User: 我应该怎么做？", 'HINT')
-    _emit_starter_template_hint('ollama')
+    _emit_starter_template_hint('ollama', user_config)
     report_error('request aborted: no User message found')
     return False
 
@@ -1316,7 +1369,12 @@ def answer():
     # 处理输入
     history, user_config = _parse_input()
 
-    if not _validate_history_before_request(history):
+    # TELLME 环境查询：engine_type 为 TELLME 时输出环境清单后退出，不访问网络
+    if _get_user_config_item("engine_type", "ollama", user_config) == 'TELLME':
+        _emit_tellme_environment(user_config)
+        sys.exit(0)
+
+    if not _validate_history_before_request(history, user_config):
         sys.exit(2)
 
     # 获取verbose配置（尽早获取，以便后续调试信息能正确输出）

@@ -162,6 +162,34 @@ def list_builtin_provider_ids():
     return sorted(result)
 
 
+def list_provider_specs():
+    """枚举全部 provider 描述：内置目录 + 用户目录（同名时用户文件深合并
+    覆盖内置），返回按 id 排序的 spec 列表。供环境查询（TELLME）使用。"""
+    specs = {}
+    for provider_id in list_builtin_provider_ids():
+        spec = load_provider_spec(provider_id)
+        if spec:
+            specs[provider_id] = spec
+    user_dir = get_user_provider_dir()
+    if os.path.isdir(user_dir):
+        for name in sorted(os.listdir(user_dir)):
+            if not name.endswith('.json'):
+                continue
+            provider_id = name[:-5]
+            if provider_id in specs:
+                continue  # 同名用户文件已在 load_provider_spec 中合并
+            spec = load_json_file(os.path.join(user_dir, name))
+            if not spec:
+                continue
+            errors = validate_provider_spec(spec)
+            if errors:
+                sys.stderr.write('[provider] %s ignored: %s\n'
+                                 % (name, '; '.join(errors)))
+                continue
+            specs[provider_id] = spec
+    return [specs[provider_id] for provider_id in sorted(specs)]
+
+
 def _resolve_alias(value, aliases):
     if value in aliases:
         return aliases[value]
