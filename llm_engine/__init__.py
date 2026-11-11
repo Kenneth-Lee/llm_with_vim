@@ -21,7 +21,7 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding=_file_encoding, errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding=_file_encoding, errors='replace')
 
-__version__ = "2.0.20260410"
+__version__ = "2.0.20261111"
 
 from llm_engine.engine import answer
 
