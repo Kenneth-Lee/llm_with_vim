@@ -61,11 +61,18 @@
 :set runtimepath?
 ```
 
-`scriptnames` 输出里应能看到 `<你的家目录>\vimfiles\plugin\llm.vim`。没有的话：
+`scriptnames` 输出里应能看到 `<你的家目录>\vimfiles\plugin\llm.vim`。
+
+特别地：如果 llm.vim **在** scriptnames 列表里，但 `:LLMHelp` 却不存在——说明脚本
+加载到一半出错中断了（命令定义在文件末尾），执行 `:messages` 查看报错，常见于
+编码问题（见本节末尾）或 vim 版本过老缺少某功能。
+
+llm.vim 不在 scriptnames 里时：
 
 * HOME 不一致：安装脚本写入的是 `%USERPROFILE%\vimfiles`，而 vim 的 `~` 解析到了别处
   （比如环境变量 `HOME` 指向网络盘）。对比 `expand('~')` 与安装输出路径，把
-  vimfiles 拷到 vim 实际的家目录即可。
+  vimfiles 拷到 vim 实际的家目录即可。（新版 install.py 已按 vim 的规则解析家目录，
+  并会主动询问 vim 确认，两处不一致时两处都装——重跑安装脚本通常可直接修复。）
 * 运行的 vim 和安装目标不是同一个：Neovim 不读 `~/vimfiles`（Windows 上配置在
   `~/AppData/Local/nvim`）；WSL 里的 vim 读的是 Linux 家目录；微软商店版 vim 的
   路径也有差异。

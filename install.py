@@ -148,10 +148,57 @@ def _find_vim():
     return None
 
 
-def _get_vim_dirs():
+def _vim_home():
+    """与 Vim 的家目录解析规则保持一致（:help $HOME-windows）
+
+    Vim 顺序: $HOME > $HOMEDRIVE$HOMEPATH > $USERPROFILE；
+    而 Python expanduser 优先 USERPROFILE。公司环境（HOME 被设置、
+    漫游配置文件重定向）下两者会指向不同目录，导致插件装到
+    vim 根本不读的位置。
+    """
+    if platform.system() == 'Windows':
+        home = os.environ.get('HOME')
+        if home:
+            return os.path.normpath(home)
+        drive = os.environ.get('HOMEDRIVE')
+        path = os.environ.get('HOMEPATH')
+        if drive and path:
+            return os.path.normpath(os.path.join(drive, path))
+    return os.path.expanduser('~')
+
+
+def _query_vim_home(vim_cmd):
+    """问 vim 自己家目录在哪（最权威，避免任何环境变量解析差异）"""
+    if vim_cmd not in ('vim', 'gvim'):
+        return None
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix='cf_vimhome_', suffix='.txt')
+    os.close(fd)
+    vim_path = tmp.replace('\\', '/')
+    try:
+        subprocess.check_call(
+            [vim_cmd, '--not-a-term', '-u', 'NONE', '-n',
+             '-c', "call writefile([expand('~')], '%s')" % vim_path,
+             '-c', 'qa!'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15)
+        with open(tmp, 'r', encoding='utf-8', errors='replace') as f:
+            home = f.read().strip()
+        return home or None
+    except Exception:
+        return None
+    finally:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+
+
+def _get_vim_dirs(vim_home=None):
     """获取 Vim 插件目录列表（按优先级）"""
     system = platform.system()
-    home = os.path.expanduser('~')
+    home = vim_home or _vim_home()
     dirs = []
 
     if system == 'Windows':
@@ -186,6 +233,19 @@ def install_vim():
     info('检测到: ' + vim_cmd)
 
     vim_dirs = _get_vim_dirs()
+
+    # 问 vim 自己家目录在哪；与推测不一致时补装一份并提示
+    # （Windows 上 HOME/HOMEDRIVE 与 USERPROFILE 不一致时会出现这种情况）
+    vim_reported = _query_vim_home(vim_cmd)
+    if vim_reported:
+        guessed = _vim_home()
+        if os.path.normpath(vim_reported) != os.path.normpath(guessed):
+            extra = os.path.join(vim_reported, 'vimfiles')
+            if extra not in vim_dirs:
+                warn('vim 报告的家目录(%s)与默认推测(%s)不一致，两处都会安装'
+                     % (vim_reported, guessed))
+                vim_dirs.append(extra)
+
     installed = False
 
     for vim_dir in vim_dirs:
