@@ -49,7 +49,25 @@ pip install .
 pip install -e .
 ```
 
-安装后会在 PATH 中提供 `llm_engine` 命令。
+安装后会在 PATH 中提供 `contextforge` 命令（旧名 `llm_engine` / `llm-engine`
+仍可用，是同一个程序的过渡别名）。
+
+#### 使用 uv
+
+如果你用 [uv](https://docs.astral.sh/uv/) 管理 Python，有两种方式：
+
+```bash
+# 方式一（推荐）：作为独立工具安装，命令进入 ~/.local/bin，
+# 不依赖任何虚拟环境的激活，编辑器集成可直接找到
+uv tool install --editable /path/to/llm_with_vim
+python install.py --no-pip        # 再装编辑器插件文件
+
+# 方式二：装进当前激活的 uv 虚拟环境（注意使用编辑器时该环境需在 PATH 上）
+uv pip install -e .
+```
+
+uv 创建的虚拟环境默认不含 pip 模块；在此类环境中运行 `install.py` 会自动
+改用 `uv pip install` 完成安装，无需手动干预。
 
 ###  安装VIM插件
 

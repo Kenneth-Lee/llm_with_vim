@@ -14,6 +14,13 @@ LLM with Vim/VSCode/Micro - 插件安装脚本
     python install.py --micro   # 仅安装 micro 插件
     python install.py --copy    # 拷贝方式安装（默认符号链接；拷贝后与仓库解耦）
 
+uv 用户：
+    - 推荐独立工具方式（命令进 ~/.local/bin，不依赖虚拟环境激活）:
+        uv tool install --editable <仓库路径>
+        python install.py --no-pip
+    - 在 uv 管理的虚拟环境中运行本脚本时，若环境无 pip 模块
+      （uv venv 默认不装），会自动改用 uv pip 安装。
+
 默认符号链接（可编辑安装）：仓库内改动即时生效，git pull 即升级，
 但要求仓库目录保持原位不可删除。加 --copy 则全部改为拷贝（含 pip
 常规安装），安装后可移动/删除仓库，代价是仓库更新后需重新运行安装。
@@ -47,27 +54,60 @@ def header(msg):
 
 # ==================== pip 安装 ====================
 
+def _pip_available():
+    """当前解释器是否有可用的 pip 模块（uv venv 默认不附带 pip）"""
+    try:
+        subprocess.check_call(
+            [sys.executable, '-m', 'pip', '--version'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL)
+        return True
+    except Exception:
+        return False
+
+
 def install_pip():
-    header('安装 LLM Engine (pip)')
+    header('安装 LLM Engine')
     # --copy 时常规安装（不依赖本仓库）；默认 -e 可编辑安装（仓库内改代码即生效）
-    if COPY_MODE:
-        cmd = [sys.executable, '-m', 'pip', 'install', SCRIPT_DIR]
-        manual = 'pip install ' + SCRIPT_DIR
+    editable = not COPY_MODE
+    uv_bin = shutil.which('uv')
+
+    use_uv = False
+    if not _pip_available():
+        if uv_bin:
+            use_uv = True
+            warn('当前环境没有 pip 模块，改用 uv pip 安装')
+        else:
+            error('当前 Python 环境没有 pip，也未找到 uv，请手动安装（二选一）:')
+            error('  pip install -e ' + SCRIPT_DIR)
+            error('  uv tool install --editable ' + SCRIPT_DIR)
+            return False
+
+    if use_uv:
+        cmd = [uv_bin, 'pip', 'install', '--python', sys.executable]
+        manual = '%s pip install --python %s' % (uv_bin, sys.executable)
     else:
-        cmd = [sys.executable, '-m', 'pip', 'install', '-e', SCRIPT_DIR]
-        manual = 'pip install -e ' + SCRIPT_DIR
+        cmd = [sys.executable, '-m', 'pip', 'install']
+        manual = 'pip install'
+    if editable:
+        cmd.append('-e')
+        manual += ' -e'
+    cmd.append(SCRIPT_DIR)
+    manual += ' ' + SCRIPT_DIR
+
     try:
         subprocess.check_call(
             cmd,
             stdout=subprocess.DEVNULL if not VERBOSE else None
         )
-        info('pip 安装完成: ' + manual)
+        info('安装完成: ' + manual)
         return True
     except subprocess.CalledProcessError:
-        error('pip 安装失败，请手动运行: ' + manual)
+        error('安装失败，请手动运行: ' + manual)
+        error('uv 用户也可以: uv tool install --editable ' + SCRIPT_DIR)
         return False
     except FileNotFoundError:
-        error('找不到 pip，请先安装 pip')
+        error('找不到安装工具，请先安装 pip 或 uv')
         return False
 
 
