@@ -38,6 +38,58 @@
 
 参考[安装指南](INSTALL.md)。
 
+### 安装后 vim 插件未激活的排查
+
+安装成功（`vimfiles/plugin/llm.vim` 确实存在）但打开 `.llm` 文件没有高亮和热键时，
+在 vim 里按以下顺序检查，可以快速定位断在哪一环（Windows 用户尤其容易遇到）。
+
+第一步，二分定位——插件到底加载没有：
+
+```
+:LLMHelp
+```
+
+这是插件加载时注册的全局命令，不依赖文件类型检测。能弹出帮助说明插件已加载，
+问题在文件类型识别（跳到第三步）；提示“不是编辑器命令”说明脚本根本没被
+加载（继续第二步）。
+
+第二步，确认脚本在 runtimepath 上（Windows 上最常见的两类原因）：
+
+```
+:scriptnames
+:echo expand('~')
+:set runtimepath?
+```
+
+`scriptnames` 输出里应能看到 `<你的家目录>\vimfiles\plugin\llm.vim`。没有的话：
+
+* HOME 不一致：安装脚本写入的是 `%USERPROFILE%\vimfiles`，而 vim 的 `~` 解析到了别处
+  （比如环境变量 `HOME` 指向网络盘）。对比 `expand('~')` 与安装输出路径，把
+  vimfiles 拷到 vim 实际的家目录即可。
+* 运行的 vim 和安装目标不是同一个：Neovim 不读 `~/vimfiles`（Windows 上配置在
+  `~/AppData/Local/nvim`）；WSL 里的 vim 读的是 Linux 家目录；微软商店版 vim 的
+  路径也有差异。
+
+第三步，确认 vimrc 和文件类型检测：
+
+```
+:echo $MYVIMRC
+:set filetype?
+:filetype
+```
+
+* `$MYVIMRC` 为空说明你以为在改的 vimrc 根本没被读取。Windows 上 vimrc 放在家
+  目录，名字 `_vimrc` 或 `.vimrc` 都行；注意记事本的“隐藏已知文件扩展名”可能
+  让它实际变成 `_vimrc.txt`。
+* vimrc 里需要 `filetype plugin on`（它同时开启检测和插件加载，本插件的
+  `ftdetect` 钩子就是在这一步生效的）。编辑 `.llm` 文件时 `set filetype?` 应显示
+  `llm`。
+* 如果你的 vimfiles 里有自定义的 `filetype.vim`，它会整体替换内置版本，需要自行
+  保证 `ftdetect` 目录仍被加载。
+
+最后看一眼加载期报错：`:messages`。中文 Windows 上若 vim 默认 cp936 编码，脚本里
+的 UTF-8 中文注释偶发解析问题，可在 vimrc 开头加 `set encoding=utf-8`。
+
 ## 用法
 
 这里主要介绍原理。

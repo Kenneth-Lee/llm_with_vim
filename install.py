@@ -232,6 +232,10 @@ def install_vim():
         info('Vim 插件已安装到: ' + vim_dir)
         installed = True
 
+    if installed:
+        info('验证: 用 vim 打开 .llm 文件后执行 :LLMHelp 应弹出帮助；'
+             '未激活时按 README.md "安装后 vim 插件未激活的排查"一节检查')
+
     return installed
 
 
