@@ -16,10 +16,16 @@
 
 ## 安装方法
 
-### 方法 1: 使用项目安装脚本（推荐）
+### 方法 1: 安装命令（推荐）
 
 ```bash
-cd /home/kenny/work/llm_with_vim
+pip install llm-with-vim
+llm-with-vim-setup --micro
+```
+
+或从源码仓库：
+
+```bash
 python install.py --micro
 ```
 

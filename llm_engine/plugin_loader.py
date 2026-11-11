@@ -6,7 +6,7 @@
 * 插件是一个 py 文件，文件内定义接口类子类并在模块级调用 CFPlugin.register()
   完成自注册（导入即初始化，无 setup/teardown）。
 * 哪些插件文件参与运行由插件选择清单 plugins.json 决定：包内清单列出内置
-  插件（只读），用户清单（~/.config/contextforge/plugins.json）列出用户插件，
+  插件（只读），用户清单（~/.config/llm-with-vim/plugins.json）列出用户插件，
   并可用 disable 字段排除内置插件。
 * 主程序通过 CFPlugin.lookup 使用插件：按服务取列表（多选），或按服务加
   名字取单个（单选/分发）。

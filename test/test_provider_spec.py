@@ -7,6 +7,7 @@ from llm_engine.provider_spec import (
     build_api_url,
     build_model_query_url,
     get_config_root,
+    get_legacy_user_config_paths,
     get_user_config_path,
     load_provider_spec,
     resolve_provider_runtime,
@@ -22,12 +23,21 @@ def test_builtin_provider_spec_loads():
     assert spec['endpoint']['template']
 
 
-def test_config_root_uses_contextforge_name(monkeypatch):
+def test_config_root_uses_llm_with_vim_name(monkeypatch):
     monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
     monkeypatch.setenv('HOME', '/tmp/fake-home')
     root = get_config_root()
-    assert root.endswith(os.path.join('.config', 'contextforge'))
-    assert get_user_config_path().endswith(os.path.join('contextforge', 'config.json'))
+    assert root.endswith(os.path.join('.config', 'llm-with-vim'))
+    assert get_user_config_path().endswith(os.path.join('llm-with-vim', 'config.json'))
+
+
+def test_legacy_user_config_paths_ordered_newest_first(monkeypatch):
+    monkeypatch.delenv('XDG_CONFIG_HOME', raising=False)
+    monkeypatch.setenv('HOME', '/tmp/fake-home')
+    paths = get_legacy_user_config_paths()
+    # 按新旧顺序：contextforge/config.json 在前，llm_engine/llm_engine.json 在后
+    assert paths[0].endswith(os.path.join('contextforge', 'config.json'))
+    assert paths[1].endswith(os.path.join('llm_engine', 'llm_engine.json'))
 
 
 def test_runtime_resolution_uses_spec_defaults():

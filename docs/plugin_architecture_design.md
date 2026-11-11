@@ -57,7 +57,7 @@ CFPlugin.lookup("plugin_name")找到这种插件的列表，根据具体使用�
 
 **插件选择清单 plugins.json** 回答“哪些插件参与运行”。两个来源：包内
 `llm_engine/plugins/plugins.json` 清单内置插件，用户目录
-`~/.config/contextforge/plugins.json` 清单用户自己的插件文件，并可用 disable
+`~/.config/llm-with-vim/plugins.json` 清单用户自己的插件文件，并可用 disable
 字段排除内置插件。“写了 10 个只想用 8 个”通过改清单完成，不必动插件文件；包内
 清单随 pip 安装只读，用户的选择全部落在自己目录的清单里，与 ContextForge 的配置
 分层（L0 内置 / L2 用户全局）一致。

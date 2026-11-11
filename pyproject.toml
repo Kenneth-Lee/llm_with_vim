@@ -1,20 +1,41 @@
 [build-system]
-requires = ["setuptools>=45"]
+requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "llm-engine"
+name = "llm-with-vim"
 dynamic = ["version"]
-description = "LLM chat engine for Vim/VSCode integration"
+description = "LLM chat engine for Vim/VSCode/Micro: the conversation is an editable text file"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.6"
+authors = [
+    {name = "Kenneth Lee", email = "kenneth-lee-2012@qq.com"},
+]
+keywords = ["llm", "chat", "vim", "vscode", "micro", "ollama", "deepseek", "ai"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.6",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Text Editors",
+    "Topic :: Utilities",
+]
 dependencies = [
     "requests",
 ]
 
+[project.urls]
+Homepage = "https://github.com/Kenneth-Lee/llm_with_vim"
+Issues = "https://github.com/Kenneth-Lee/llm_with_vim/issues"
+
 [project.scripts]
-contextforge = "llm_engine:main"
+llm-with-vim = "llm_engine:main"
+llm-with-vim-setup = "llm_engine.install_editors:main"
 llm_engine = "llm_engine:main"
 llm-engine = "llm_engine:main"
 
@@ -23,6 +44,33 @@ version = {attr = "llm_engine.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["llm_engine*"]
+# vscode 扩展的 node_modules 里有些 npm 包自带 python 文件（如 flatted），
+# 会被误认为子包打进 wheel，必须排除
+exclude = ["llm_engine.editors.vscode.*", "llm_engine.editors.vscode"]
 
 [tool.setuptools.package-data]
-llm_engine = ["default_config.json", "tool_definitions.json", "providers/*.json", "schemas/*.json"]
+llm_engine = [
+    "default_config.json",
+    "providers/*.json",
+    "schemas/*.json",
+    "editors/vim/plugin/*.vim",
+    "editors/vim/ftdetect/*.vim",
+    "editors/vim/doc/*.txt",
+    "editors/vscode/extension.js",
+    "editors/vscode/package.json",
+    "editors/vscode/README.md",
+    "editors/vscode/LICENSE",
+    "editors/vscode/syntaxes/*.json",
+    "editors/micro/README.md",
+    "editors/micro/llm_micro/*.lua",
+    "editors/micro/llm_micro/repo.json",
+    "editors/micro/llm_micro/syntax/*.yaml",
+    "editors/micro/llm_micro/help/*.md",
+]
+
+[tool.setuptools.exclude-package-data]
+llm_engine = [
+    "editors/vscode/node_modules/*",
+    "editors/vscode/.vscode/*",
+    "editors/vscode/*.vsix",
+]

@@ -1,6 +1,26 @@
 # 安装指南
 
-## 快速安装
+## 从 PyPI 安装（推荐）
+
+```bash
+pip install llm-with-vim
+llm-with-vim-setup            # 检测并安装 Vim/VSCode/micro 编辑器插件
+```
+
+uv 用户：
+
+```bash
+uv tool install llm-with-vim  # 命令进入 ~/.local/bin，不依赖虚拟环境激活
+llm-with-vim-setup
+```
+
+也可以只装部分编辑器插件（`--vim` / `--vscode` / `--micro`）：
+
+```bash
+llm-with-vim-setup --vim
+```
+
+## 快速安装（从源码）
 
 如果你已经下载源代码了，而且打算就放在某个目录下用，那么你直接用一键安装脚本就行了：
 
@@ -10,7 +30,7 @@ python install.py
 
 脚本会依次完成：
 
-1. pip 安装 llm\_engine 包（提供 `llm_engine` 命令）
+1. pip 安装 llm\_engine 包（提供 `llm-with-vim` 命令，旧名 `llm_engine` 仍可用）
 2. 检测 Vim/Neovim/GVim，符号链接插件到 `~/.vim/`（Windows 为 `~/vimfiles/`）
 3. 检测 VSCode/VSCode Insiders/VSCodium，符号链接扩展到扩展目录
 4. 安装 micro 插件到 `~/.config/micro/plug/llm_micro`（Windows 为 `%APPDATA%/micro/plug/llm_micro`）
@@ -49,8 +69,8 @@ pip install .
 pip install -e .
 ```
 
-安装后会在 PATH 中提供 `contextforge` 命令（旧名 `llm_engine` / `llm-engine`
-仍可用，是同一个程序的过渡别名）。
+安装后会在 PATH 中提供 `llm-with-vim` 命令（旧名 `llm_engine` / `llm-engine`
+仍可用，是同一个程序的过渡别名），以及编辑器插件安装命令 `llm-with-vim-setup`。
 
 #### 使用 uv
 
@@ -75,9 +95,9 @@ uv 创建的虚拟环境默认不含 pip 模块；在此类环境中运行 `inst
 
 ```bash
 mkdir -p ~/.vim/plugin ~/.vim/ftdetect ~/.vim/doc
-cp vim/plugin/llm.vim ~/.vim/plugin/
-cp vim/ftdetect/llm.vim ~/.vim/ftdetect/
-cp vim/doc/llm.txt ~/.vim/doc/
+cp llm_engine/editors/vim/plugin/llm.vim ~/.vim/plugin/
+cp llm_engine/editors/vim/ftdetect/llm.vim ~/.vim/ftdetect/
+cp llm_engine/editors/vim/doc/llm.txt ~/.vim/doc/
 vim -c 'helptags ~/.vim/doc' -c 'qa!'   # 使 :help llm 生效
 ```
 
@@ -86,7 +106,7 @@ vim -c 'helptags ~/.vim/doc' -c 'qa!'   # 使 :help llm 生效
 ##### Vim-Plug
 在 `~/.vimrc` 中添加（`rtp` 选项指定插件素材所在的子目录）：
 ```vim
-Plug 'your-username/llm_with_vim', {'rtp': 'vim/'}
+Plug 'your-username/llm_with_vim', {'rtp': 'llm_engine/editors/vim/'}
 ```
 
 ##### Vundle
@@ -106,32 +126,29 @@ Vundle 不支持指定子目录，请改用上面的 Vim-Plug 或 `install.py` �
 ```
 
 插件会按以下顺序查找引擎命令：
-1. `llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
-2. 插件目录中的 `llm_engine.py`（向后兼容）
-3. PATH 中的 `llm_engine.py`
+1. `llm-with-vim`、`llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
+2. `python -m llm_engine`（当前 python 环境可导入时）
 
 ### VSCode 扩展安装
 
 #### 方法 1: 符号链接安装（推荐）
 
 ```bash
-ln -s /path/to/llm_with_vim/vscode ~/.vscode/extensions/llm-chat-0.1.0
+ln -s /path/to/llm_with_vim/llm_engine/editors/vscode ~/.vscode/extensions/llm-with-vim.llm-with-vscode
 ```
 
 重启 VSCode 即可。
 
 VSCode 扩展会按以下顺序查找引擎：
-1. `llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
-2. 扩展目录中的 `llm_engine.py`（向后兼容）
-3. 工作区根目录
+1. `llm-with-vim`、`llm_engine` 或 `llm-engine` 命令（pip 安装）- **推荐**
 
 #### 方法 2: 打包安装
 
 ```bash
 npm install -g @vscode/vsce
-cd vscode
-vsce package
-code --install-extension llm-chat-0.1.0.vsix
+cd llm_engine/editors/vscode
+vsce package --no-dependencies
+code --install-extension llm-with-vscode-<version>.vsix
 ```
 
 ### micro 插件安装
@@ -148,7 +165,7 @@ python install.py --micro
 
 ```bash
 mkdir -p ~/.config/micro/plug
-ln -s /path/to/llm_with_vim/micro/llm_micro ~/.config/micro/plug/llm_micro
+ln -s /path/to/llm_with_vim/llm_engine/editors/micro/llm_micro ~/.config/micro/plug/llm_micro
 ```
 
 Windows 手动安装目录：`%APPDATA%\\micro\\plug\\llm_micro`

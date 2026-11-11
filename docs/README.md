@@ -13,6 +13,7 @@
 * [@@inc原语的设计思路](inc_directive.md)
 * [插件化设计](plugin_architecture_design.md)
 
-其中ContextForge是本项目进入架构标准化的项目名称，目的是建立一个可以编辑上下文
+其中ContextForge是本项目进入架构标准化时提出的架构名称（项目/发布名现为
+llm-with-vim），目的是建立一个可以编辑上下文
 的Agent。和其他自动生成提交上下文的Agent思路不同，本项目的目的就是让用户直接看
 到提交的全部上下文，知道自己提交了什么，从而对LLM进行精细的控制。

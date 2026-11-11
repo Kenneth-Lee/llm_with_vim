@@ -1,11 +1,13 @@
-# ContextForge（llm_with_vim）
+# LLM with Vim
 
-这是一个简单有用的LLM Resful API访问访问引擎。
+这是一个简单有用的LLM Restful API访问引擎。
 
-最初的时候，我主要用它实现从vim对ollama进行访问的。所以名字较llm_with_vim。后来
-慢慢增加其他的LLM API的支持，又增加vscode和micro的插件，所以，旧的名字已经名不
-符实了，所以，现在我把它叫做ContextForge，本质上，它是一个可以让你在编辑器中不
-断编辑和LLM的交互历史的另类“智能体”（Agent）。
+最初的时候，我主要用它实现从vim对ollama进行访问的，所以叫做llm_with_vim。后来
+慢慢增加其他LLM API的支持，又增加vscode和micro的插件。2.0版本重构引入了新的
+插件化引擎架构（我们称之为ContextForge架构，见
+[架构设计](docs/contextforge_architecture_design.md)），但项目名保持为
+llm-with-vim。本质上，它是一个可以让你在编辑器中不断编辑和LLM的交互历史的另类
+“智能体”（Agent）。
 
 也许很多人都知道，但也许也有很多人不知道：现在的大语言模型都是没有记忆的。它完
 成训练以后，内容就固定了，你给它说什么，它就基于你说的话决定返回什么。
@@ -36,7 +38,20 @@
 
 ## 安装
 
-参考[安装指南](INSTALL.md)。
+最简单的方式是从 PyPI 安装（支持 pip / uv）：
+
+```bash
+pip install llm-with-vim          # 或 uv tool install llm-with-vim
+llm-with-vim-setup                # 检测并安装 Vim/VSCode/micro 插件
+```
+
+也可以只装部分编辑器插件：
+
+```bash
+llm-with-vim-setup --vim          # 仅 Vim 插件（--vscode / --micro 同理）
+```
+
+从源码安装或了解可编辑安装、uv 等方式，参考[安装指南](INSTALL.md)。
 
 ### 安装后 vim 插件未激活的排查
 
@@ -101,15 +116,15 @@ llm.vim 不在 scriptnames 里时：
 
 这里主要介绍原理。
 
-我们的应用的主体是一个python程序，命令名为 `contextforge`（旧名 `llm_engine` /
+我们的应用的主体是一个python程序，命令名为 `llm-with-vim`（旧名 `llm_engine` /
 `llm-engine` 仍可用，是同一个程序的过渡别名）。如果你本地已经安装了ollama，简
 单的用法是这样：
 ```bash
-echo "User: hello" | contextforge
+echo "User: hello" | llm-with-vim
 ```
 或者
 ```bash
-contextforge < chat.llm
+llm-with-vim < chat.llm
 ```
 这个程序的使用方式就是把你输入的对话提交给LLM，然后把对话本身，以及
 LLM的回答，一起返回给你。
@@ -230,7 +245,7 @@ User: 请读取 /etc/hostname 并告诉我这台机器的名称
 
 每个工具是 `llm_engine/plugins/tools/` 下的一个插件文件，由
 `llm_engine/plugins/plugins.json` 清单选择加载；用户也可在
-`~/.config/contextforge/plugins.json` 清单中登记自己的工具插件或排除内置工具
+`~/.config/llm-with-vim/plugins.json` 清单中登记自己的工具插件或排除内置工具
 （详见 `docs/plugin_architecture_design.md`）。通过`max_tool_rounds`（默认10）可以
 控制单次对话中工具调用的最大轮数。
 
@@ -263,7 +278,7 @@ User/System/Assistant都是LLM或者人说的话，所以是自然语言的。�
 
 本地之外的模型通常需要配置apikey，模板中通常只有一个占位符，需要自己修改成你自
 己的API key。如果你不想每个llm文件都出现这个信息，也可以写到用户目录配置中：
-`~/.config/contextforge/config.json`（新路径，推荐）。
+`~/.config/llm-with-vim/config.json`（新路径，推荐）。
 当前仍兼容旧路径 `~/.config/llm_engine/llm_engine.json`：首次运行时会自动把
 旧配置迁移到新路径并在输出中提示（原文件保留，确认无误后可删除）。
 
@@ -296,12 +311,12 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 
 ### 全局配置
 
-除了通过单个llm文件配置单个会话的参数，contextforge也可以通过独立配置文件进行全
-局配置（推荐 `~/.config/contextforge/config.json`，旧文件
+除了通过单个llm文件配置单个会话的参数，llm-with-vim也可以通过独立配置文件进行全
+局配置（推荐 `~/.config/llm-with-vim/config.json`，旧文件
 `~/.config/llm_engine/llm_engine.json` 会被自动迁移），这些配置分三层：
 
 * 默认配置：这个内嵌在llm\_engine的模块目录中
-* 用户配置：推荐放在$HOME/.config/contextforge/config.json，兼容旧目录
+* 用户配置：推荐放在$HOME/.config/llm-with-vim/config.json，兼容旧目录
   $HOME/.config/llm\_engine/
 * 文件配置：这个就是前面Configure角色的定义
 
@@ -324,7 +339,7 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 ### 环境变量
 
 * `LLM_ENGINE_CONFIG`：指定用户配置文件的完整路径（默认
-  `~/.config/contextforge/config.json`）
+  `~/.config/llm-with-vim/config.json`）
 * `LLM_ENGINE_DEBUG`：等价于 Configure 里写 `'debug': True`
 * `LLM_FILE_DIR`：工具和图片的相对路径基准目录，编辑器插件会自动设置为当前
   llm 文件所在目录
@@ -390,7 +405,7 @@ llm文件还提供一些辅助语法，以便更容易维护代码逻辑。这�
 openai\_compat）。上条“任意引擎名称”的原理就是：引擎不认识这个名字时，自动回
 退到 openai\_compat 描述用 OpenAI 协议访问。
 
-你也可以增加自己的引擎：拷贝一份内置描述到 `~/.config/contextforge/providers/`
+你也可以增加自己的引擎：拷贝一份内置描述到 `~/.config/llm-with-vim/providers/`
 下修改（服务地址、默认模型、鉴权方式、模型查询地址、别名等都是字段化的），文件
 名即引擎名，用户描述会覆盖同名的内置描述。字段含义和设计思路参考
 [ContextForge架构设计](docs/contextforge_architecture_design.md)。

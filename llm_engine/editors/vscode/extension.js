@@ -9,8 +9,8 @@ let firstOpenHintShown = false;
 
 function findLLMEngine() {
     try {
-        execFileSync('contextforge', ['--help'], { stdio: 'ignore', timeout: 3000 });
-        return { cmd: 'contextforge', args: [] };
+        execFileSync('llm-with-vim', ['--help'], { stdio: 'ignore', timeout: 3000 });
+        return { cmd: 'llm-with-vim', args: [] };
     } catch (e) {}
     try {
         execFileSync('llm_engine', ['--help'], { stdio: 'ignore', timeout: 3000 });

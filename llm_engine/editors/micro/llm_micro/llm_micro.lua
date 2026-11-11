@@ -152,9 +152,9 @@ local function findEngine()
     end
 
     if isWindows() then
-        local out0, err0 = runUserShellCommand("where contextforge >nul 2>&1 && echo contextforge")
-        if err0 == nil and out0 ~= nil and out0:find("contextforge") ~= nil then
-            state.cachedEngineCmd = "contextforge"
+        local out0, err0 = runUserShellCommand("where llm-with-vim >nul 2>&1 && echo llm-with-vim")
+        if err0 == nil and out0 ~= nil and out0:find("llm-with-vim", 1, true) ~= nil then
+            state.cachedEngineCmd = "llm-with-vim"
             return state.cachedEngineCmd
         end
 
@@ -182,9 +182,9 @@ local function findEngine()
             return state.cachedEngineCmd
         end
     else
-        local out0, err0 = runUserShellCommand("command -v contextforge >/dev/null 2>&1 && echo contextforge")
-        if err0 == nil and out0 ~= nil and out0:find("contextforge") ~= nil then
-            state.cachedEngineCmd = "contextforge"
+        local out0, err0 = runUserShellCommand("command -v llm-with-vim >/dev/null 2>&1 && echo llm-with-vim")
+        if err0 == nil and out0 ~= nil and out0:find("llm-with-vim", 1, true) ~= nil then
+            state.cachedEngineCmd = "llm-with-vim"
             return state.cachedEngineCmd
         end
 

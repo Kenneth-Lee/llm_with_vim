@@ -116,7 +116,7 @@ Zhipu AI、阿里 DashScope、Haijing、Llama 等）交互。
 
 配置文件层次（优先级从高到低）：
   1. .llm 文件中的 Configure: 行
-  2. 用户配置 ~/.config/llm_engine/llm_engine.json
+  2. 用户配置 ~/.config/llm-with-vim/config.json（旧路径自动迁移）
   3. 包内置默认配置 default_config.json
 
 支持的引擎：ollama, deepseek, zhipu, ali, haijing, llama 以及
@@ -140,10 +140,15 @@ OpenAI 兼容引擎（通过 server_addr 指定）。
 ==============================================================================
 安装                                                      *llm-install*
 
-将 plugin/llm.vim 和 doc/llm.txt 放入 Vim 插件目录：>
+安装 llm-with-vim 包后运行安装命令（推荐）：>
 
-    cp plugin/llm.vim ~/.vim/plugin/
-    cp doc/llm.txt ~/.vim/doc/
+    pip install llm-with-vim
+    llm-with-vim-setup --vim
+
+<或从源码仓库手动拷贝：>
+
+    cp llm_engine/editors/vim/plugin/llm.vim ~/.vim/plugin/
+    cp llm_engine/editors/vim/doc/llm.txt ~/.vim/doc/
     helptags ~/.vim/doc/
 <
 
@@ -153,7 +158,8 @@ OpenAI 兼容引擎（通过 server_addr 指定）。
 故障排除                                                  *llm-troubleshoot*
 
 LLM 请求不响应
-    - 确认 llm_engine 已安装: pip install -e /path/to/llm_with_vim
+    - 确认 llm_engine 已安装: pip install llm-with-vim
+      （源码方式: pip install -e /path/to/llm_with_vim）
     - 确认后端服务（如 Ollama）正在运行
     - 按 K 中断后重试
 

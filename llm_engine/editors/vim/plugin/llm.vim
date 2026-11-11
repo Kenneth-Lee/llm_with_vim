@@ -9,8 +9,8 @@ let g:llm_engine_loaded = 1
 " 搜索顺序: 1. pip安装的命令 2. python -m llm_engine
 function! s:FindLLMEngine()
 	" 1. 检查pip安装的命令（推荐方式，新名字优先）
-	if executable('contextforge')
-		return 'contextforge'
+	if executable('llm-with-vim')
+		return 'llm-with-vim'
 	endif
 	if executable('llm_engine')
 		return 'llm_engine'

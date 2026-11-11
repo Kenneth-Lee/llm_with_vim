@@ -20,7 +20,7 @@ from llm_engine.provider_spec import (
     build_api_url,
     build_model_query_url,
     get_config_root,
-    get_legacy_user_config_path,
+    get_legacy_user_config_paths,
     load_json_file,
     resolve_provider_runtime,
 )
@@ -93,8 +93,9 @@ def _load_config():
 
     配置优先级（从高到低）：
       1. 每个 .llm 文件中的 Configure: 行（运行时覆盖）
-            2. 用户配置 ~/.config/contextforge/config.json
-            3. 兼容旧配置 ~/.config/llm_engine/llm_engine.json
+            2. 用户配置 ~/.config/llm-with-vim/config.json
+            3. 兼容旧配置 ~/.config/contextforge/config.json、
+               ~/.config/llm_engine/llm_engine.json（自动迁移）
       3. 包内置默认配置 default_config.json
 
     用户配置文件只需包含需要修改的部分（如 auth_keys），会与默认配置深度合并。
@@ -110,30 +111,31 @@ def _load_config():
             print("Error loading default config: %s" % default_path, file=sys.stderr)
             sys.exit(1)
 
-        # 旧配置自动迁移：新配置不存在且未用环境变量显式指定时，拷贝旧配置到新路径
+        # 旧配置自动迁移：新配置不存在且未用环境变量显式指定时，
+        # 按新旧顺序找第一份旧配置拷贝到新路径
         # 迁移失败不覆盖任何文件，继续按旧路径读取（见 docs/contextforge_architecture_design.md 7.2）
         env_config_path = os.environ.get('LLM_ENGINE_CONFIG')
         if env_config_path:
             env_config_path = os.path.expanduser(env_config_path)
-        legacy_path = get_legacy_user_config_path()
+        legacy_paths = get_legacy_user_config_paths()
         new_path = os.path.join(get_config_root(), 'config.json')
-        if (os.path.isfile(legacy_path) and not os.path.isfile(new_path)
-                and not env_config_path):
-            try:
-                if not os.path.isdir(get_config_root()):
-                    os.makedirs(get_config_root())
-                with open(legacy_path, 'rb') as src, open(new_path, 'wb') as dst:
-                    dst.write(src.read())
-                print("@// 已自动迁移旧配置到 %s（原文件 %s 保留，确认无误后可删除）"
-                      % (new_path, legacy_path))
-            except Exception as e:
-                print("@// 旧配置自动迁移失败(%s)，继续直接读取旧路径" % e, file=sys.stderr)
+        if not os.path.isfile(new_path) and not env_config_path:
+            for legacy_path in legacy_paths:
+                if not os.path.isfile(legacy_path):
+                    continue
+                try:
+                    if not os.path.isdir(get_config_root()):
+                        os.makedirs(get_config_root())
+                    with open(legacy_path, 'rb') as src, open(new_path, 'wb') as dst:
+                        dst.write(src.read())
+                    print("@// 已自动迁移旧配置到 %s（原文件 %s 保留，确认无误后可删除）"
+                          % (new_path, legacy_path))
+                except Exception as e:
+                    print("@// 旧配置自动迁移失败(%s)，继续直接读取旧路径" % e, file=sys.stderr)
+                break
 
-        # 先加载旧配置，再加载新配置目录，最后允许显式环境变量覆盖
-        user_config_paths = [
-            legacy_path,
-            new_path,
-        ]
+        # 先加载旧配置（列表靠后者优先），再加载新配置，最后允许显式环境变量覆盖
+        user_config_paths = legacy_paths + [new_path]
         if env_config_path and env_config_path not in user_config_paths:
             user_config_paths.append(env_config_path)
 

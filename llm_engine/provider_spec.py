@@ -9,8 +9,14 @@ import os
 import re
 import sys
 
-_APP_NAME = 'contextforge'
-_LEGACY_APP_NAME = 'llm_engine'
+_APP_NAME = 'llm-with-vim'
+# 历史配置目录（按新旧顺序），用于自动迁移：
+#   llm_engine 时代:  ~/.config/llm_engine/llm_engine.json
+#   contextforge 时代（架构名）: ~/.config/contextforge/config.json
+_LEGACY_CONFIG_LAYOUTS = (
+    ('contextforge', 'config.json'),
+    ('llm_engine', 'llm_engine.json'),
+)
 _PACKAGE_DIR = os.path.dirname(__file__)
 _BUILTIN_PROVIDER_DIR = os.path.join(_PACKAGE_DIR, 'providers')
 
@@ -55,22 +61,16 @@ def deep_merge(base, override):
     return base
 
 
+def _config_base_dir():
+    if sys.platform == 'win32':
+        return os.environ.get('APPDATA') or os.path.join(
+            os.path.expanduser('~'), 'AppData', 'Roaming')
+    return os.environ.get('XDG_CONFIG_HOME') or os.path.join(
+        os.path.expanduser('~'), '.config')
+
+
 def get_config_root():
-    if sys.platform == 'win32':
-        base = os.environ.get('APPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
-        return os.path.join(base, _APP_NAME)
-
-    base = os.environ.get('XDG_CONFIG_HOME') or os.path.join(os.path.expanduser('~'), '.config')
-    return os.path.join(base, _APP_NAME)
-
-
-def get_legacy_config_root():
-    if sys.platform == 'win32':
-        base = os.environ.get('APPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming')
-        return os.path.join(base, _LEGACY_APP_NAME)
-
-    base = os.environ.get('XDG_CONFIG_HOME') or os.path.join(os.path.expanduser('~'), '.config')
-    return os.path.join(base, _LEGACY_APP_NAME)
+    return os.path.join(_config_base_dir(), _APP_NAME)
 
 
 def get_user_config_path():
@@ -80,8 +80,10 @@ def get_user_config_path():
     return os.path.join(get_config_root(), 'config.json')
 
 
-def get_legacy_user_config_path():
-    return os.path.join(get_legacy_config_root(), 'llm_engine.json')
+def get_legacy_user_config_paths():
+    """历史用户配置文件路径列表（按新旧顺序），供迁移和回退读取"""
+    base = _config_base_dir()
+    return [os.path.join(base, d, f) for d, f in _LEGACY_CONFIG_LAYOUTS]
 
 
 def get_builtin_provider_dir():
